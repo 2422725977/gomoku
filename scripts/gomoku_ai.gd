@@ -65,6 +65,10 @@ const EASY_RANDOM_CHANCE: float = 0.1    # 简单难度随机落子概率
 # ------------------------------------------------------------------ 内部状态
 var difficulty: int = DIFFICULTY_NORMAL
 
+## 连珠数（3-6），由 UI 经 set_rules() 下发；默认 5 = 标准五子棋。
+## 棋盘尺寸不单独存：每次 get_best_move 都从传入的 board 推断（board.size()）。
+var _win_count: int = 5
+
 var _n: int = BOARD_SIZE
 var _w: int = BOARD_SIZE + PAD * 2        # 带哨兵边界的行宽
 var _tables_n: int = -1                   # 线表已按哪个尺寸构建
@@ -109,6 +113,12 @@ func set_difficulty(level: int) -> void:
 	elif level > DIFFICULTY_HARD:
 		level = DIFFICULTY_HARD
 	difficulty = level
+
+
+## 规则自适应：设置连珠数（3-6）。
+## 棋盘尺寸无需传入 —— get_best_move() 会从 board.size() 自动推断。
+func set_rules(win_count: int) -> void:
+	_win_count = clampi(win_count, 3, 6)
 
 
 ## 清理置换表与内部状态（两局之间调用）
@@ -237,12 +247,31 @@ func get_best_move(board: Array, ai_color: int) -> Vector2i:
 # 难度与统计
 # =============================================================================
 
+## 搜索深度：先按【棋盘尺寸】定基准（大棋盘分支爆炸，必须收敛深度），
+## 再按【难度档位】微调：EASY=-1 / NORMAL=0 / HARD=+1。
+##   9 路 → 5 层    12 路 → 4 层    15 路 → 3 层    19 路 → 2 层
 func _depth_for_difficulty() -> int:
-	if difficulty == DIFFICULTY_EASY:
-		return 1
-	if difficulty == DIFFICULTY_HARD:
-		return 5
-	return 3
+	var base: int = 2
+	if _n <= 9:
+		base = 5
+	elif _n <= 12:
+		base = 4
+	elif _n <= 15:
+		base = 3
+	else:
+		base = 2
+	return clampi(base + difficulty - 1, 1, 6)
+
+
+## 不同连珠数下的「活三」权重。
+## 连珠数越少，「活三 → 活四 → 取胜」的链条越短，活三的威胁就越大：
+##   WIN_COUNT=3 时活三几乎等同胜势；WIN_COUNT=4 时需要大幅提升到冲四同级。
+func _open_three_score() -> int:
+	if _win_count <= 3:
+		return SCORE_OPEN_FOUR / 2
+	if _win_count == 4:
+		return SCORE_OPEN_THREE * 10
+	return SCORE_OPEN_THREE
 
 
 func _set_stats(depth: int, score: int, started_ms: int) -> void:
@@ -280,10 +309,17 @@ func _find_tactic_move(me: int) -> Vector2i:
 func _find_five_move(color: int) -> int:
 	var best_idx: int = -1
 	var best_val: int = -1
+	var cell_count: int = _grid.size()
 	for r in _n:
+		if r < 0 or r >= _n:
+			continue
 		var base: int = (r + PAD) * _w + PAD
 		for c in _n:
+			if c < 0 or c >= _n:
+				continue
 			var idx: int = base + c
+			if idx < 0 or idx >= cell_count:
+				continue
 			if _grid[idx] != EMPTY:
 				continue
 			if _near[idx] == 0:
@@ -303,10 +339,17 @@ func _find_five_move(color: int) -> int:
 func _find_open_four_move(color: int) -> int:
 	var best_idx: int = -1
 	var best_val: int = -1
+	var cell_count: int = _grid.size()
 	for r in _n:
+		if r < 0 or r >= _n:
+			continue
 		var base: int = (r + PAD) * _w + PAD
 		for c in _n:
+			if c < 0 or c >= _n:
+				continue
 			var idx: int = base + c
+			if idx < 0 or idx >= cell_count:
+				continue
 			if _grid[idx] != EMPTY:
 				continue
 			if _near[idx] == 0:
@@ -437,13 +480,21 @@ func _store_tt(key: int, depth: int, score: int, flag: int, move: int, ply: int)
 # =============================================================================
 
 ## 生成候选点并按威胁值降序排列；limit < 0 表示不截断
+## 边界保护：行列严格限制在 [0, _n) 内，索引再夹一次 _grid 范围。
 func _generate_moves(color: int, tt_move: int, limit: int) -> PackedInt32Array:
 	var opp: int = _other(color)
 	var keys: PackedInt64Array = PackedInt64Array()
+	var cell_count: int = _grid.size()
 	for r in _n:
+		if r < 0 or r >= _n:
+			continue
 		var base: int = (r + PAD) * _w + PAD
 		for c in _n:
+			if c < 0 or c >= _n:
+				continue
 			var idx: int = base + c
+			if idx < 0 or idx >= cell_count:
+				continue
 			if _grid[idx] != EMPTY:
 				continue
 			if _near[idx] == 0:
@@ -502,31 +553,33 @@ func _dir_pattern(idx: int, step: int, color: int) -> int:
 
 
 ## 棋型打分：count=连子数，open_a/open_b=两端是否为空，has_gap=中间是否跨了一个空位
+## 所有档位都相对【当前连珠数 w】判定，因此 3~6 连规则共用同一套评估。
 func _pattern_score(count: int, open_a: bool, open_b: bool, has_gap: bool) -> int:
 	var opens: int = 0
 	if open_a:
 		opens += 1
 	if open_b:
 		opens += 1
+	var w: int = _win_count
 	if has_gap:
-		# 中间有空位：补上该空位即五连，因此最高只能算“冲四”
-		if count >= 4:
+		# 中间有空位：补上该空位即达成 w 连，因此最高只能算“冲四”
+		if count >= w - 1:
 			return SCORE_FOUR
-	elif count >= 5:
-		return SCORE_FIVE          # 五连（含 6 子以上长连）
-	if count == 4:
+	elif count >= w:
+		return SCORE_FIVE              # 达成连珠（含超长连）
+	if count == w - 1:
 		if opens == 2:
 			return SCORE_OPEN_FOUR
 		if opens == 1:
 			return SCORE_FOUR
 		return 0
-	if count == 3:
+	if count == w - 2 and count >= 2:
 		if opens == 2:
-			return SCORE_OPEN_THREE
+			return _open_three_score()
 		if opens == 1:
 			return SCORE_SLEEPING_THREE
 		return 0
-	if count == 2:
+	if count == w - 3 and count >= 2:
 		if opens == 2:
 			return SCORE_OPEN_TWO
 		return 0
@@ -792,7 +845,7 @@ func _other(color: int) -> int:
 	return BLACK
 
 
-## idx 处（已落 color 子）是否形成五连及以上（长连同样算胜）
+## idx 处（已落 color 子）是否达成连珠（_win_count 子及以上，超长连同样算胜）
 func _makes_five(idx: int, color: int) -> bool:
 	for d in DIR_COUNT:
 		var step: int = _steps[d]
@@ -805,7 +858,7 @@ func _makes_five(idx: int, color: int) -> bool:
 		while _grid[i] == color:
 			count += 1
 			i -= step
-		if count >= 5:
+		if count >= _win_count:
 			return true
 	return false
 

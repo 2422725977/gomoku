@@ -38,42 +38,46 @@ game3/
 ├── icon.svg
 ├── README.md
 ├── scenes/
-│   └── Main.tscn            # 主场景：BoardUI 根节点
+│   └── Main.tscn            # 主场景：BoardUI + 羊皮纸背景 + RightPanel
 ├── scripts/
-│   ├── board.gd             # 棋盘：绘制 + 状态 + 输入 + 视觉动画
-│   ├── ui.gd                # 界面：Theme / 弹窗 / 音效 + AI 调度
-│   └── gomoku_ai.gd         # AI 算法（Alpha-Beta），纯算法、无场景依赖
+│   ├── board.gd             # 棋盘：参数化几何 + 绘制 + 状态 + 输入 + 动画
+│   ├── ui.gd                # 界面：木色主题 / 滑动面板 / 弹窗 / 音效 + AI 调度
+│   └── gomoku_ai.gd         # AI 算法（Alpha-Beta），纯算法、规则自适应
+├── assets/ui/wood_bg.png    # 木色羊皮纸回纹背景（1600x1538）
 ├── docs/
-│   ├── screenshot.png       # README 主图
+│   ├── screenshot.png       # README 主图（15 路）
+│   ├── ui_9x9.png           # 9 路配图
+│   ├── ui_19x19.png         # 19 路配图
 │   ├── ui_win.png           # 胜利界面配图
-│   └── UI_OPTIMIZATION.md   # v1.1 UI 优化完整说明
+│   ├── UI_OPTIMIZATION.md   # v1.1 UI 优化说明
+│   └── V12_UPDATE.md        # v1.2 参数化 / 木色 UI / 滑动面板说明
 └── addons/godot_ai/         # Godot AI MCP 插件（勿手改）
 ```
 
 ## 3. 场景节点树（`scenes/Main.tscn`）
 
 ```
-BoardUI                (Control)      ← scripts/ui.gd
-├── Background         (ColorRect)    ← 深色背景，mouse_filter = IGNORE
-├── ChessBoard         (Node2D)       ← scripts/board.gd，位于 (40, 60)
-└── UILayer            (Control)      ← mouse_filter = IGNORE（不挡棋盘点击）
-    ├── TurnLabel      (Label)        ← 「黑棋回合」/「白棋回合」/「黑棋胜利！」
-    ├── BottomBar      (HBoxContainer)
-    │   ├── RestartButton    (Button)     「重新开始」
-    │   ├── UndoButton       (Button)     「悔棋」
-    │   ├── DifficultyLabel  (Label)      「AI 难度」
-    │   └── DifficultyOption (OptionButton) 简单 / 普通 / 困难
-    └── SidePanel      (VBoxContainer)
-        ├── SideTitleLabel  (Label)   「对局信息」
-        ├── AiStatusLabel   (Label)   AI 思考状态
-        ├── MoveCountLabel  (Label)   步数统计
-        └── HintLabel       (Label)   操作提示
+BoardUI                  (Control)        ← scripts/ui.gd
+├── WoodBackground       (TextureRect)    ← wood_bg.png，KEEP_ASPECT_COVERED
+├── ChessBoard           (Node2D)         ← scripts/board.gd，位于 (30, 60)
+└── UILayer              (Control)        ← mouse_filter = IGNORE（不挡棋盘点击）
+    ├── TurnLabel        (Label)          ← 「黑棋回合」/「白棋回合」/「黑棋胜利！」
+    └── RightPanel       (VBoxContainer)  ← x 686~976，alignment=CENTER 垂直居中
+        ├── TitlePanel   (PanelContainer) → 「玩法设置」
+        ├── SizePanel    (PanelContainer) → 「棋盘大小：15 x 15」 + SizeSlider  (9~19)
+        ├── WinPanel     (PanelContainer) → 「连珠数：5」        + WinSlider   (3~6)
+        ├── AiPanel      (PanelContainer) → 「AI 难度：普通」    + AiSlider    (1~3)
+        ├── BtnPanel     (PanelContainer) → [重新开始] [悔棋]
+        └── InfoPanel    (PanelContainer) → AiStatusLabel / MoveCountLabel
 ```
 
-> **关键**：根节点 `BoardUI`、`UILayer`、`Background` 以及所有非交互控件
+> 每个分组都由 `PanelContainer` 包裹，统一套 `StyleBoxFlat`：
+> 圆角 8px、`#FFFFFFAA` 底、`#8B6642` 描边、4px 投影。
+
+> **关键**：根节点 `BoardUI`、`UILayer`、`WoodBackground` 以及所有非交互控件
 > 都必须保持 `mouse_filter = IGNORE`（tscn 中为 `mouse_filter = 2`），
 > 否则会拦截棋盘的鼠标点击（详见 §7 第 2 条）。
-> 按钮保持默认 `STOP` 即可正常接收点击。
+> 按钮与 HSlider 保持默认 `STOP` 即可正常接收点击/拖动。
 
 ## 4. 代码约定
 
@@ -113,22 +117,29 @@ ui.gd::_on_stone_placed()
 | `1` | 黑棋（玩家，先行） |
 | `2` | 白棋（AI） |
 
-`board` 是 **15×15 的二维数组**，索引方式 `board[row][col]`。
+`board` 是 **`board_size` × `board_size` 的二维数组**（默认 15×15），
+索引方式恒为 `board[row][col]`。`board_size` 可变，但数组**结构从不改变**。
 
-### 棋盘几何（`board.gd`）
+### 棋盘几何（`board.gd`，**全部随 `board_size` 动态计算**）
 
-| 常量 | 值 | 说明 |
+| 变量 | 15 路时的值 | 说明 |
 | --- | --- | --- |
-| `BOARD_SIZE` | 15 | 交叉点数 |
-| `CELL_SIZE` | 40.0 | 每格像素 |
-| `BOARD_PX` | 640.0 | 棋盘区域边长 |
-| `GRID_PX` | 560.0 | 网格跨度 = 14 × 40 |
-| `ORIGIN_X/Y` | 40.0 | 网格起点 = (640 − 560) / 2 |
-| `STONE_RADIUS` | 16.0 | 棋子半径 |
-| `LINE_WIDTH` | 1.5 | 网格线宽，深棕色 |
+| `board_size` | 15 | 交叉点数（9~19，可调） |
+| `BOARD_PX` | 640.0 | 棋盘绘制区固定边长（const） |
+| `BOARD_MARGIN` | 40.0 | 网格四周留白（const） |
+| `cell_size` | 40.0 | `560 / (board_size - 1)` |
+| `grid_px` | 560.0 | `BOARD_PX - BOARD_MARGIN * 2` |
+| `origin_x/y` | 40.0 | `= BOARD_MARGIN` |
+| `stone_radius` | 16.0 | `clampf(cell_size * 0.40, 6, 30)` |
+| `star_radius` | 3.5 | `clampf(cell_size * 0.088, 1.5, 5)` |
+| `mark_radius` | 4.0 | `clampf(stone_radius * 0.25, 2, 6)` |
+| `LINE_WIDTH` | 1.5 | 网格线宽（const） |
 
-> 规格给出「边距 20px」，但 15 条线按 40px 间距只占 560px；
-> 代码按**居中对齐**处理，实际留白为 40px，视觉更对称。
+尺寸 → 格宽 / 棋子半径实测：9 路 70.0 / 28.0，13 路 46.7 / 18.7，
+**15 路 40.0 / 16.0（与原版一致）**，19 路 31.1 / 12.4。
+
+> 星位由 `_star_points()` 生成：`board_size >= 13` 时为天元 + 4 星位，
+> 否则只有天元。
 
 ## 6. 对外接口契约
 
@@ -137,6 +148,13 @@ ui.gd::_on_stone_placed()
 ```gdscript
 signal stone_placed(row: int, col: int)
 signal game_over(winner: int)              # 1=黑, 2=白, 0=和棋
+
+# —— 玩法参数（v1.2 起可在运行时调整）——
+var board_size: int = 15     # 9~19
+var win_count:  int = 5      # 3~6
+var ai_level:   int = 2      # 1~3（仅记录，实际由 ui.gd 下发给 AI）
+
+func set_rules(new_size: int, new_win: int, new_level: int = -1) -> void   # 应用并重开一局
 
 func place_stone(row: int, col: int) -> bool            # 玩家落子
 func set_ai_move(row: int, col: int, color: int = 0) -> bool   # AI 落子（预留接口）
@@ -152,34 +170,50 @@ var winner: int              # 1 / 2 / 0
 var input_locked: bool       # AI 思考期间由 ui.gd 置位
 ```
 
+> **棋盘数据结构不变**：始终是 `board[row][col]` 的二维 `Array`，
+> `0=空 / 1=黑 / 2=白`。参数化只影响尺寸、连珠数与几何。
+
 ### `gomoku_ai.gd`（`extends RefCounted`，纯算法）
 
 ```gdscript
 func get_best_move(board: Array, ai_color: int) -> Vector2i   # 返回 (row, col)，无棋可下返回 (-1, -1)
 func set_difficulty(level: int) -> void                       # 0=简单 1=普通 2=困难
+func set_rules(win_count: int) -> void                        # 连珠数 3~6；棋盘尺寸由 board.size() 推断
 func reset() -> void
-func get_last_stats() -> Dictionary                           # 可选
+func get_last_stats() -> Dictionary                           # {"nodes","depth","score","elapsed_ms"}
 ```
 
 **约束**：`gomoku_ai.gd` 必须是纯算法文件 —— 不得 `extends Node`、
 不得引用场景树或其它脚本、不得修改传入的 `board`。
 
-### 难度档位
+### 难度与深度（v1.2 起深度由「尺寸 × 难度」共同决定）
 
-| 索引 | 名称 | 深度 | 其它 |
-| --- | --- | --- | --- |
-| 0 | 简单 | 1 | 10% 概率随机落子 |
-| 1 | 普通 | 3 | — |
-| 2 | 困难 | 5 | 2 秒时限 |
+```
+base  = 5 (n<=9) / 4 (n<=12) / 3 (n<=15) / 2 (n>15)
+depth = clampi(base + difficulty - 1, 1, 6)      # EASY=-1 / NORMAL=0 / HARD=+1
+```
+
+实测：9 路普通档 深度 5 / 465ms，19 路普通档 深度 2 / 9ms。
+
+### 评估权重随连珠数变化（v1.2）
+
+| 连子数 | 分值 |
+| --- | --- |
+| `>= win_count` | `SCORE_FIVE` = 1,000,000 |
+| `== win_count-1` 两端空 / 一端空 | 活四 100,000 / 冲四 10,000 |
+| `== win_count-2` 两端空（活三） | 3 连时 50,000；**4 连时 10,000**；5 连及以上 1,000 |
+| `== win_count-2` 一端空 | 眠三 100 |
+| `== win_count-3` 两端空 | 活二 10 |
 
 ## 7. 已修复的坑（勿回退）
 
 1. **信号广播顺序**：`_apply_move()` 必须**先**更新 `current_player` /
    `game_finished`，**再** `emit stone_placed`。否则 UI 读到旧状态，
    轮次标签会慢一拍，且 AI 永远不会被触发。
-2. **`mouse_filter`**：根节点 `BoardUI` 与 `UILayer`、`Background` 都必须是
-   `IGNORE`（tscn 中 `mouse_filter = 2`）。否则根 Control 会盖住整个视口，
-   `gui_get_hovered_control()` 永远非空 → **棋盘一点就点不动**。
+2. **`mouse_filter`**：根节点 `BoardUI`、`UILayer`、`WoodBackground` 以及
+   所有非交互控件都必须是 `IGNORE`（tscn 中 `mouse_filter = 2`）。
+   否则根 Control 会盖住整个视口，`gui_get_hovered_control()` 永远非空
+   → **棋盘一点就点不动**。
    （已用对照实验确认：改回默认 STOP 后，点击全部被拒。）
 3. **`_input` 中的 UI 守卫**：落子前检查
    `get_viewport().gui_get_hovered_control() != null`，避免点按钮时误落子。
@@ -208,6 +242,16 @@ func get_last_stats() -> Dictionary                           # 可选
 13. **落子动画的 Tween 会吃掉首帧大 delta**：场景刚加载完的第一帧
     delta 可能高达 60ms+（`GradientTexture2D` 构建等），会把 260ms 的
     弹跳动画压缩掉大半。做动画计时验证时要先预热 1 秒再采样。
+14. **新增图片资源后必须 `--import`**：Godot 4 不会在非编辑器模式下自动导入。
+    直接跑主场景会报 `No loader found for resource: ... (expected type: Texture2D)`
+    与 `[ext_resource] referenced non-existent resource`。解决办法：
+    `godot --headless --path . --import`。
+15. **`HSlider` 只监听 `drag_ended` 会漏掉非拖动改值**：点击滑轨、方向键
+    改值都不发 `drag_ended`，只挂它会「改了不生效」。正确做法是
+    `value_changed` 里起一个一次性 `Timer` 做防抖 + `drag_ended` 立即应用。
+16. **胜负弹窗别居棋盘正中**：棋盘中央那条横线（15 路时是第 7 行，y≈380）
+    是最常见的获胜位置，弹窗居正中会正好压住闪烁的连线。
+    因此 `CenterContainer` 的 `offset_bottom` 收到 440，把弹窗中心抬到 y≈250。
 
 ## 8. 验证方式（已跑通，0 失败）
 
@@ -222,12 +266,16 @@ func get_last_stats() -> Dictionary                           # 可选
 实测性能（困难档，深度 5 + 2s 上限）：自对弈 25 手，单步最大 1537 ms，
 平均 661 ms；普通档单步约 27 ms。
 
-## 9. v1.1 视觉层约定
+## 9. 视觉层约定（v1.1 / v1.2）
 
 - **视觉状态与棋局状态严格分离**：`board.gd` 中的 `_stone_scale` /
   `_hover_cell` / `_win_line` / `_win_phase` 只服务渲染，**从不写回**棋局数据。
 - **动画统一走信号**：落子弹跳监听已有的 `stone_placed`，不改 `_apply_move()`。
-- **零外部资源**：木纹用 `GradientTexture2D`、音效用 `AudioStreamWAV` 合成、
-  中文字体用 `SystemFont`；仓库里没有任何 ttf / wav / shader 文件。
-- 完整的优化说明见 `docs/UI_OPTIMIZATION.md`。
+- **参数变化走 `set_rules()`**：尺寸/连珠数变化必须通过它，它会重算几何、
+  清空动画记录并重开一局；不要绕过它直接改 `board_size`。
+- **外部资源只有一个**：`assets/ui/wood_bg.png`（背景图）。
+  其余全部零素材 —— 木纹用 `GradientTexture2D`、
+  音效用 `AudioStreamWAV` 合成、中文字体用 `SystemFont`，
+  仓库里没有任何 ttf / wav / shader 文件。
+- 详细说明见 `docs/UI_OPTIMIZATION.md`（v1.1）与 `docs/V12_UPDATE.md`（v1.2）。
 

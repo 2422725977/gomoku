@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui.gd" id="1_ui"]
 [ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+[ext_resource type="Texture2D" path="res://assets/ui/wood_bg.png" id="3_wood"]
 
 [node name="BoardUI" type="Control"]
 layout_mode = 3
@@ -13,7 +14,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("1_ui")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="WoodBackground" type="TextureRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,10 +22,12 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.121569, 0.133333, 0.168627, 1)
+texture = ExtResource("3_wood")
+expand_mode = 1
+stretch_mode = 6
 
 [node name="ChessBoard" type="Node2D" parent="."]
-position = Vector2(40, 60)
+position = Vector2(30, 60)
 script = ExtResource("2_board")
 
 [node name="UILayer" type="Control" parent="."]
@@ -38,82 +41,137 @@ mouse_filter = 2
 
 [node name="TurnLabel" type="Label" parent="UILayer"]
 layout_mode = 0
-offset_left = 40.0
-offset_top = 10.0
-offset_right = 680.0
-offset_bottom = 50.0
+offset_left = 30.0
+offset_top = 8.0
+offset_right = 670.0
+offset_bottom = 52.0
 mouse_filter = 2
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 30
 text = "黑棋回合"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="BottomBar" type="HBoxContainer" parent="UILayer"]
+[node name="RightPanel" type="VBoxContainer" parent="UILayer"]
 layout_mode = 0
-offset_left = 40.0
-offset_top = 708.0
-offset_right = 680.0
-offset_bottom = 752.0
+offset_left = 686.0
+offset_top = 40.0
+offset_right = 976.0
+offset_bottom = 740.0
 mouse_filter = 2
 theme_override_constants/separation = 12
 alignment = 1
 
-[node name="RestartButton" type="Button" parent="UILayer/BottomBar"]
-custom_minimum_size = Vector2(130, 42)
+[node name="TitlePanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="UILayer/RightPanel/TitlePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 21
+text = "玩法设置"
+horizontal_alignment = 1
+
+[node name="SizePanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="SizeBox" type="VBoxContainer" parent="UILayer/RightPanel/SizePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="SizeLabel" type="Label" parent="UILayer/RightPanel/SizePanel/SizeBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 15
+text = "棋盘大小：15 x 15"
+
+[node name="SizeSlider" type="HSlider" parent="UILayer/RightPanel/SizePanel/SizeBox"]
+layout_mode = 2
+min_value = 9.0
+max_value = 19.0
+step = 1.0
+value = 15.0
+
+[node name="WinPanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="WinBox" type="VBoxContainer" parent="UILayer/RightPanel/WinPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="WinLabel" type="Label" parent="UILayer/RightPanel/WinPanel/WinBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 15
+text = "连珠数：5"
+
+[node name="WinSlider" type="HSlider" parent="UILayer/RightPanel/WinPanel/WinBox"]
+layout_mode = 2
+min_value = 3.0
+max_value = 6.0
+step = 1.0
+value = 5.0
+
+[node name="AiPanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="AiBox" type="VBoxContainer" parent="UILayer/RightPanel/AiPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="AiLabel" type="Label" parent="UILayer/RightPanel/AiPanel/AiBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 15
+text = "AI 难度：普通"
+
+[node name="AiSlider" type="HSlider" parent="UILayer/RightPanel/AiPanel/AiBox"]
+layout_mode = 2
+min_value = 1.0
+max_value = 3.0
+step = 1.0
+value = 2.0
+
+[node name="BtnPanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="BtnBox" type="HBoxContainer" parent="UILayer/RightPanel/BtnPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="UILayer/RightPanel/BtnPanel/BtnBox"]
+custom_minimum_size = Vector2(120, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "重新开始"
 
-[node name="UndoButton" type="Button" parent="UILayer/BottomBar"]
-custom_minimum_size = Vector2(110, 42)
+[node name="UndoButton" type="Button" parent="UILayer/RightPanel/BtnPanel/BtnBox"]
+custom_minimum_size = Vector2(100, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "悔棋"
 
-[node name="DifficultyLabel" type="Label" parent="UILayer/BottomBar"]
+[node name="InfoPanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="InfoBox" type="VBoxContainer" parent="UILayer/RightPanel/InfoPanel"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_font_sizes/font_size = 16
-text = "AI 难度"
-vertical_alignment = 1
+theme_override_constants/separation = 4
 
-[node name="DifficultyOption" type="OptionButton" parent="UILayer/BottomBar"]
-custom_minimum_size = Vector2(130, 42)
-layout_mode = 2
-theme_override_font_sizes/font_size = 16
-
-[node name="SidePanel" type="VBoxContainer" parent="UILayer"]
-layout_mode = 0
-offset_left = 712.0
-offset_top = 60.0
-offset_right = 968.0
-offset_bottom = 400.0
-mouse_filter = 2
-theme_override_constants/separation = 12
-
-[node name="SideTitleLabel" type="Label" parent="UILayer/SidePanel"]
+[node name="AiStatusLabel" type="Label" parent="UILayer/RightPanel/InfoPanel/InfoBox"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_font_sizes/font_size = 18
-text = "对局信息"
-
-[node name="AiStatusLabel" type="Label" parent="UILayer/SidePanel"]
-layout_mode = 2
-mouse_filter = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "AI 待命"
 autowrap_mode = 3
 
-[node name="MoveCountLabel" type="Label" parent="UILayer/SidePanel"]
+[node name="MoveCountLabel" type="Label" parent="UILayer/RightPanel/InfoPanel/InfoBox"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "步数统计：0 手"
-
-[node name="HintLabel" type="Label" parent="UILayer/SidePanel"]
-layout_mode = 2
-mouse_filter = 2
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.639216, 0.67451, 0.741176, 1)
-text = "你执黑先行，点击棋盘交叉点落子。"
-autowrap_mode = 3

@@ -18,31 +18,48 @@ signal game_over(winner: int)
 
 
 # ---------------------------------------------------------------------------
-# 棋盘几何常量
+# 玩法参数（可在运行时调整）
+# 【重要】棋盘数据结构不变：依然是 board[row][col] 的二维数组，
+# 0=空 / 1=黑 / 2=白。改动只影响尺寸、连珠数与 AI 档位。
 # ---------------------------------------------------------------------------
-const BOARD_SIZE: int = 15          ## 15x15 个交叉点
-const CELL_SIZE: float = 40.0       ## 每格 40px
-const MARGIN: float = 20.0          ## 规格指定的边距
-const BOARD_PX: float = 640.0       ## 棋盘区域 640x640
-const GRID_PX: float = (BOARD_SIZE - 1) * CELL_SIZE   ## 网格跨度 = 14 * 40 = 560px
+const MIN_BOARD_SIZE: int = 9
+const MAX_BOARD_SIZE: int = 19
+const MIN_WIN_COUNT: int = 3
+const MAX_WIN_COUNT: int = 6
+const MIN_AI_LEVEL: int = 1
+const MAX_AI_LEVEL: int = 3
 
-## 网格原点：560px 的跨度在 640px 内居中 → 左右/上下各留 40px。
-## 规格给出 MARGIN = 20，但 15 条线按 40px 间距只占 560px，
-## 居中对齐后视觉更对称，因此这里以居中结果作为实际起点。
-const ORIGIN_X: float = (BOARD_PX - GRID_PX) * 0.5
-const ORIGIN_Y: float = (BOARD_PX - GRID_PX) * 0.5
+## 棋盘交叉点数（9-19），默认 15
+var board_size: int = 15
+
+## 连珠取胜所需子数（3-6），默认 5
+var win_count: int = 5
+
+## AI 难度档（1-3），默认 2（普通）
+var ai_level: int = 2
+
+# ---------------------------------------------------------------------------
+# 棋盘几何（随 board_size 自适应；15 路时恰好回到「每格 40px、留白 40px」）
+# ---------------------------------------------------------------------------
+const BOARD_PX: float = 640.0       ## 棋盘绘制区域固定 640x640
+const BOARD_MARGIN: float = 40.0    ## 网格四周留白
+
+var cell_size: float = 40.0         ## 每格像素
+var grid_px: float = 560.0          ## 网格跨度 = (board_size - 1) * cell_size
+var origin_x: float = 40.0          ## 网格起点
+var origin_y: float = 40.0
+var stone_radius: float = 16.0      ## 棋子半径（随格宽缩放）
+var star_radius: float = 3.5        ## 星位圆点半径
+var mark_radius: float = 4.0        ## 最后一手标记半径
 
 # ---------------------------------------------------------------------------
 # 视觉常量
 # ---------------------------------------------------------------------------
-const STONE_RADIUS: float = 16.0    ## 棋子半径
 const LINE_WIDTH: float = 1.5       ## 网格线宽
 const BORDER_WIDTH: float = 2.0     ## 外框线宽
-const STAR_RADIUS: float = 3.5      ## 星位圆点半径
 const SHADOW_OFFSET: Vector2 = Vector2(2.5, 2.5)
-const MARK_RADIUS: float = 4.0      ## 最后一手标记半径
 
-const COLOR_BOARD: Color = Color(0.878, 0.733, 0.510, 1.0)   ## 棋盘木色
+const COLOR_BOARD: Color = Color(0.878, 0.733, 0.510, 1.0)   ## 棋盘木色（降级用）
 const COLOR_BOARD_EDGE: Color = Color(0.545, 0.400, 0.235, 1.0)
 const COLOR_LINE: Color = Color(0.353, 0.220, 0.102, 1.0)    ## 深棕色网格线
 const COLOR_SHADOW: Color = Color(0.0, 0.0, 0.0, 0.28)       ## 棋子阴影
@@ -74,11 +91,6 @@ const WIN_FLASH_SPEED: float = 3.2       ## 胜利五连闪烁速度
 const EMPTY: int = 0
 const BLACK: int = 1
 const WHITE: int = 2
-
-## 星位（含天元）
-const STAR_POINTS: Array = [
-	Vector2i(3, 3), Vector2i(3, 11), Vector2i(11, 3), Vector2i(11, 11), Vector2i(7, 7)
-]
 
 ## 连子判定方向：横、竖、右下、右上
 const DIRECTIONS: Array = [
@@ -124,6 +136,7 @@ var _win_phase: float = 0.0
 
 
 func _ready() -> void:
+	_update_geometry()
 	board = make_empty_board()
 	_wood_texture = _build_wood_texture()
 	# 只监听落子信号来驱动动画，不介入棋局状态代码
@@ -132,14 +145,57 @@ func _ready() -> void:
 
 
 # ---------------------------------------------------------------------------
+# 玩法参数与几何
+# ---------------------------------------------------------------------------
+## 依据 board_size 重算全部绘制几何（15 路时格宽恰好 40px）
+func _update_geometry() -> void:
+	grid_px = BOARD_PX - BOARD_MARGIN * 2.0
+	cell_size = grid_px / float(maxi(board_size - 1, 1))
+	origin_x = BOARD_MARGIN
+	origin_y = BOARD_MARGIN
+	stone_radius = clampf(cell_size * 0.40, 6.0, 30.0)
+	star_radius = clampf(cell_size * 0.088, 1.5, 5.0)
+	mark_radius = clampf(stone_radius * 0.25, 2.0, 6.0)
+
+
+## 星位（含天元）；小棋盘只保留天元
+func _star_points() -> Array:
+	var n: int = board_size
+	var pts: Array = [Vector2i(n / 2, n / 2)]
+	if n >= 13:
+		var e: int = 3
+		pts.append(Vector2i(e, e))
+		pts.append(Vector2i(e, n - 1 - e))
+		pts.append(Vector2i(n - 1 - e, e))
+		pts.append(Vector2i(n - 1 - e, n - 1 - e))
+	return pts
+
+
+## 应用新规则并重开一局。
+## 【注意】棋盘结构不变，仍是 board[row][col]；只是尺寸与连珠数变了。
+func set_rules(new_size: int, new_win: int, new_level: int = -1) -> void:
+	board_size = clampi(new_size, MIN_BOARD_SIZE, MAX_BOARD_SIZE)
+	# 连珠数不能超过棋盘边长
+	win_count = clampi(new_win, MIN_WIN_COUNT, mini(MAX_WIN_COUNT, board_size))
+	if new_level >= 0:
+		ai_level = clampi(new_level, MIN_AI_LEVEL, MAX_AI_LEVEL)
+	_update_geometry()
+	# 尺寸变了，旧的动画/闪烁记录全部作废
+	_stone_scale.clear()
+	_win_line.clear()
+	_win_active = false
+	restart()
+
+
+# ---------------------------------------------------------------------------
 # 棋盘数据
 # ---------------------------------------------------------------------------
-## 生成 15x15 的空棋盘
+## 生成 board_size x board_size 的空棋盘（结构仍是 Array[row][col]）
 func make_empty_board() -> Array:
 	var result: Array = []
-	for _row in BOARD_SIZE:
+	for _row in board_size:
 		var line: Array = []
-		line.resize(BOARD_SIZE)
+		line.resize(board_size)
 		line.fill(EMPTY)
 		result.append(line)
 	return result
@@ -156,25 +212,25 @@ func get_move_count() -> int:
 
 
 func is_inside(row: int, col: int) -> bool:
-	return row >= 0 and row < BOARD_SIZE and col >= 0 and col < BOARD_SIZE
+	return row >= 0 and row < board_size and col >= 0 and col < board_size
 
 
 # ---------------------------------------------------------------------------
-# 坐标换算
+# 坐标换算（全部基于当前 board_size 的动态几何）
 # ---------------------------------------------------------------------------
 ## 网格坐标 (row, col) → 本节点局部像素坐标
 func grid_to_local(cell: Vector2i) -> Vector2:
-	return Vector2(ORIGIN_X + cell.y * CELL_SIZE, ORIGIN_Y + cell.x * CELL_SIZE)
+	return Vector2(origin_x + cell.y * cell_size, origin_y + cell.x * cell_size)
 
 
 ## 本节点局部像素坐标 → 最近的网格交叉点；超出范围或离交叉点过远返回 (-1, -1)
 func local_to_grid(pos: Vector2) -> Vector2i:
-	var col: int = int(round((pos.x - ORIGIN_X) / CELL_SIZE))
-	var row: int = int(round((pos.y - ORIGIN_Y) / CELL_SIZE))
+	var col: int = int(round((pos.x - origin_x) / cell_size))
+	var row: int = int(round((pos.y - origin_y) / cell_size))
 	if not is_inside(row, col):
 		return Vector2i(-1, -1)
 	# 距最近交叉点超过半格则视为误触，不落子
-	if pos.distance_to(grid_to_local(Vector2i(row, col))) > CELL_SIZE * 0.5:
+	if pos.distance_to(grid_to_local(Vector2i(row, col))) > cell_size * 0.5:
 		return Vector2i(-1, -1)
 	return Vector2i(row, col)
 
@@ -230,11 +286,11 @@ func _apply_move(row: int, col: int, color: int) -> void:
 	# 先把状态改完，再广播信号：
 	# 否则监听者（UI）读到的 current_player / game_finished 还是落子前的旧值。
 	var finished: bool = false
-	if _has_five(row, col, color):
+	if _has_win(row, col, color):
 		game_finished = true
 		winner = color
 		finished = true
-	elif move_history.size() >= BOARD_SIZE * BOARD_SIZE:
+	elif move_history.size() >= board_size * board_size:
 		game_finished = true
 		winner = 0
 		finished = true
@@ -247,13 +303,13 @@ func _apply_move(row: int, col: int, color: int) -> void:
 		game_over.emit(winner)
 
 
-## 以 (row, col) 为中心判定 color 是否连成五子
-func _has_five(row: int, col: int, color: int) -> bool:
+## 以 (row, col) 为中心判定 color 是否连成 win_count 子
+func _has_win(row: int, col: int, color: int) -> bool:
 	for dir in DIRECTIONS:
 		var count: int = 1
 		count += _count_direction(row, col, dir.x, dir.y, color)
 		count += _count_direction(row, col, -dir.x, -dir.y, color)
-		if count >= 5:
+		if count >= win_count:
 			return true
 	return false
 
@@ -368,7 +424,7 @@ func _compute_win_line() -> Array:
 		var line: Array = [last_move]
 		line.append_array(_collect_dir(last_move, dir.x, dir.y, color))
 		line.append_array(_collect_dir(last_move, -dir.x, -dir.y, color))
-		if line.size() >= 5:
+		if line.size() >= win_count:
 			return line
 	return []
 
@@ -430,14 +486,20 @@ func _draw() -> void:
 	_draw_last_marker()
 
 
+## 棋盘底色叠加透明度：让底层羊皮纸纹理透出来，同时保住网格线对比度
+const BOARD_TINT_ALPHA: float = 0.55
+
+
 func _draw_board_panel() -> void:
 	var rect: Rect2 = Rect2(Vector2.ZERO, Vector2(BOARD_PX, BOARD_PX))
 	if _wood_texture != null:
-		draw_texture_rect(_wood_texture, rect, false)
+		draw_texture_rect(_wood_texture, rect, false, Color(1.0, 1.0, 1.0, BOARD_TINT_ALPHA))
 		_draw_wood_grain()
 	else:
 		draw_rect(rect, COLOR_BOARD, true)   # 纹理构建失败时的降级方案
-	draw_rect(rect, COLOR_BOARD_EDGE, false, BORDER_WIDTH)
+	# 双层木框，做出木牌的厚度感
+	draw_rect(rect, COLOR_BOARD_EDGE, false, BORDER_WIDTH * 2.0)
+	draw_rect(rect.grow(-6.0), Color(0.62, 0.47, 0.29, 0.75), false, 1.0)
 
 
 ## 极淡的横向木纹，避免棋盘显得过于平滑死板
@@ -464,31 +526,31 @@ func _draw_ghost_stone() -> void:
 	var center: Vector2 = grid_to_local(_hover_cell)
 	var tint: Color = COLOR_BLACK if current_player == BLACK else COLOR_WHITE
 	tint.a = GHOST_ALPHA
-	draw_circle(center, STONE_RADIUS, tint)
+	draw_circle(center, stone_radius, tint)
 	# 描一圈边，让半透明棋子在木色底上也看得清
-	draw_arc(center, STONE_RADIUS, 0.0, TAU, 40, Color(tint.r, tint.g, tint.b, 0.8), 1.6, true)
+	draw_arc(center, stone_radius, 0.0, TAU, 40, Color(tint.r, tint.g, tint.b, 0.8), 1.6, true)
 
 
 func _draw_grid() -> void:
-	for i in BOARD_SIZE:
-		var x: float = ORIGIN_X + i * CELL_SIZE
-		draw_line(Vector2(x, ORIGIN_Y), Vector2(x, ORIGIN_Y + GRID_PX), COLOR_LINE, LINE_WIDTH)
-		var y: float = ORIGIN_Y + i * CELL_SIZE
-		draw_line(Vector2(ORIGIN_X, y), Vector2(ORIGIN_X + GRID_PX, y), COLOR_LINE, LINE_WIDTH)
+	for i in board_size:
+		var x: float = origin_x + i * cell_size
+		draw_line(Vector2(x, origin_y), Vector2(x, origin_y + grid_px), COLOR_LINE, LINE_WIDTH)
+		var y: float = origin_y + i * cell_size
+		draw_line(Vector2(origin_x, y), Vector2(origin_x + grid_px, y), COLOR_LINE, LINE_WIDTH)
 
 
 func _draw_star_points() -> void:
-	for star in STAR_POINTS:
-		draw_circle(grid_to_local(star), STAR_RADIUS, COLOR_LINE)
+	for star in _star_points():
+		draw_circle(grid_to_local(star), star_radius, COLOR_LINE)
 
 
 func _draw_stones() -> void:
-	# 胜负已分时，让获胜五连一起呼吸式闪烁
+	# 胜负已分时，让获胜连线一起呼吸式闪烁
 	var flash: float = 1.0
 	if _win_active and not _win_line.is_empty():
 		flash = 0.42 + 0.58 * absf(sin(_win_phase))
-	for row in BOARD_SIZE:
-		for col in BOARD_SIZE:
+	for row in board_size:
+		for col in board_size:
 			var value: int = board[row][col]
 			if value == EMPTY:
 				continue
@@ -501,10 +563,13 @@ func _draw_stones() -> void:
 
 
 ## 棋子绘制：外阴影 + 边缘压暗 + 左上高光，做出球面立体感
+## 半径随棋盘尺寸缩放，9~19 路都能保持合适的棋子/格宽比例。
 func _draw_stone(center: Vector2, color: int, scale_f: float = 1.0, alpha: float = 1.0) -> void:
-	var radius: float = STONE_RADIUS * scale_f
+	var radius: float = stone_radius * scale_f
 	if radius <= 0.2:
 		return
+	var rim_r: float = maxf(radius * 0.94, radius - 1.0)
+	var rim_w: float = maxf(radius * 0.12, 1.0)
 	# 外阴影：向右下偏移的半透明黑圆
 	draw_circle(
 		center + SHADOW_OFFSET * scale_f, radius, Color(0.0, 0.0, 0.0, COLOR_SHADOW.a * alpha)
@@ -512,7 +577,7 @@ func _draw_stone(center: Vector2, color: int, scale_f: float = 1.0, alpha: float
 	if color == BLACK:
 		draw_circle(center, radius, Color(COLOR_BLACK.r, COLOR_BLACK.g, COLOR_BLACK.b, alpha))
 		# 边缘压暗，制造球面转折
-		draw_arc(center, radius - 1.0, 0.0, TAU, 48, Color(0.0, 0.0, 0.0, 0.45 * alpha), 2.0, true)
+		draw_arc(center, rim_r, 0.0, TAU, 48, Color(0.0, 0.0, 0.0, 0.45 * alpha), rim_w, true)
 		# 左上柔光 + 更小的镜面高光点
 		draw_circle(
 			center - Vector2(radius * 0.30, radius * 0.30), radius * 0.34, Color(1, 1, 1, 0.20 * alpha)
@@ -523,7 +588,7 @@ func _draw_stone(center: Vector2, color: int, scale_f: float = 1.0, alpha: float
 	else:
 		draw_circle(center, radius, Color(COLOR_WHITE.r, COLOR_WHITE.g, COLOR_WHITE.b, alpha))
 		draw_arc(
-			center, radius - 1.0, 0.0, TAU, 48, Color(0.55, 0.55, 0.58, 0.85 * alpha), 1.5, true
+			center, rim_r, 0.0, TAU, 48, Color(0.55, 0.55, 0.58, 0.85 * alpha), rim_w, true
 		)
 		draw_circle(
 			center - Vector2(radius * 0.30, radius * 0.30), radius * 0.36, Color(1, 1, 1, 0.55 * alpha)
@@ -538,4 +603,4 @@ func _draw_last_marker() -> void:
 		return
 	var center: Vector2 = grid_to_local(last_move)
 	var scale_f: float = _stone_scale.get(last_move, 1.0)
-	draw_circle(center, MARK_RADIUS * scale_f, COLOR_MARK)
+	draw_circle(center, mark_radius * scale_f, COLOR_MARK)
