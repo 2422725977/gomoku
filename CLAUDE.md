@@ -33,15 +33,20 @@ $godot = "D:\Godot4.7.2\Godot_v4.7.2-stable_win64.exe"
 
 ```
 game3/
-├── project.godot            # 主场景 / 窗口尺寸 / 自动加载
+├── project.godot            # 主场景 / 窗口 1000x760 / 版本号 / 自动加载
 ├── CLAUDE.md                # 本文件
 ├── icon.svg
+├── README.md
 ├── scenes/
 │   └── Main.tscn            # 主场景：BoardUI 根节点
 ├── scripts/
-│   ├── board.gd             # 棋盘：绘制 + 状态 + 输入
-│   ├── ui.gd                # 界面：轮次/按钮/难度 + AI 调度
+│   ├── board.gd             # 棋盘：绘制 + 状态 + 输入 + 视觉动画
+│   ├── ui.gd                # 界面：Theme / 弹窗 / 音效 + AI 调度
 │   └── gomoku_ai.gd         # AI 算法（Alpha-Beta），纯算法、无场景依赖
+├── docs/
+│   ├── screenshot.png       # README 主图
+│   ├── ui_win.png           # 胜利界面配图
+│   └── UI_OPTIMIZATION.md   # v1.1 UI 优化完整说明
 └── addons/godot_ai/         # Godot AI MCP 插件（勿手改）
 ```
 
@@ -190,6 +195,19 @@ func get_last_stats() -> Dictionary                           # 可选
 8. **无头模式不能测鼠标点击**：`--headless` 下视口是 1000×1000（非 760），
    stretch 变换导致 `push_input` 的坐标偏移，点击测试会假失败。
    输入相关验证必须**带渲染**运行。
+9. **`Input.warp_mouse()` 不会触发 Control 悬停**：它只改光标位置，
+   不产生 GUI 的 motion 事件，所以 `mouse_entered` 与 hover 样式都不生效。
+   要验证悬停必须用 `get_viewport().push_input(InputEventMouseMotion)`。
+10. **悬停预览不要写进 `_input()`**：v1.1 的幽灵棋子走 `_process()` 轮询
+    `get_local_mouse_position()`，这样完全不碰原有的点击落子路径。
+    （`_input()` 只负责真正的落子。）
+11. **`OptionButton` 继承自 `Button`**：Theme 里只配 `Button` 的 StyleBox
+    即可，OptionButton 会自动套用，不必重复设置。
+12. **中文字重**：`SystemFont.font_weight` 给标题加粗（正文 400 / 标题 700）。
+    内置字体不含 CJK，必须用 SystemFont + 回退链，否则中文显示成方框。
+13. **落子动画的 Tween 会吃掉首帧大 delta**：场景刚加载完的第一帧
+    delta 可能高达 60ms+（`GradientTexture2D` 构建等），会把 260ms 的
+    弹跳动画压缩掉大半。做动画计时验证时要先预热 1 秒再采样。
 
 ## 8. 验证方式（已跑通，0 失败）
 
@@ -203,4 +221,13 @@ func get_last_stats() -> Dictionary                           # 可选
 
 实测性能（困难档，深度 5 + 2s 上限）：自对弈 25 手，单步最大 1537 ms，
 平均 661 ms；普通档单步约 27 ms。
+
+## 9. v1.1 视觉层约定
+
+- **视觉状态与棋局状态严格分离**：`board.gd` 中的 `_stone_scale` /
+  `_hover_cell` / `_win_line` / `_win_phase` 只服务渲染，**从不写回**棋局数据。
+- **动画统一走信号**：落子弹跳监听已有的 `stone_placed`，不改 `_apply_move()`。
+- **零外部资源**：木纹用 `GradientTexture2D`、音效用 `AudioStreamWAV` 合成、
+  中文字体用 `SystemFont`；仓库里没有任何 ttf / wav / shader 文件。
+- 完整的优化说明见 `docs/UI_OPTIMIZATION.md`。
 

@@ -52,6 +52,23 @@ const COLOR_HIGHLIGHT: Color = Color(1.0, 1.0, 1.0, 0.55)
 const COLOR_MARK: Color = Color(0.851, 0.196, 0.196, 1.0)    ## 最后一手红点
 
 # ---------------------------------------------------------------------------
+# 木质渐变配色（径向：中心 → 边缘）
+# ---------------------------------------------------------------------------
+const COLOR_WOOD_CENTER: Color = Color(0.941, 0.839, 0.651, 1.0)  ## #F0D6A6
+const COLOR_WOOD_MID: Color = Color(0.902, 0.761, 0.502, 1.0)     ## #E6C280
+const COLOR_WOOD_EDGE: Color = Color(0.831, 0.655, 0.416, 1.0)    ## #D4A76A
+
+# ---------------------------------------------------------------------------
+# 视觉动画参数
+# ---------------------------------------------------------------------------
+const GHOST_ALPHA: float = 0.4           ## 悬停预览棋子透明度
+const DROP_SCALE_FROM: float = 0.5       ## 落子起始缩放（弹跳起点）
+const DROP_SCALE_OVERSHOOT: float = 1.2  ## 回弹过冲峰值
+const DROP_UP_TIME: float = 0.12         ## 0.5 → 1.2 用时
+const DROP_SETTLE_TIME: float = 0.14     ## 1.2 → 1.0 用时
+const WIN_FLASH_SPEED: float = 3.2       ## 胜利五连闪烁速度
+
+# ---------------------------------------------------------------------------
 # 棋子取值
 # ---------------------------------------------------------------------------
 const EMPTY: int = 0
@@ -94,8 +111,23 @@ var input_locked: bool = false
 var move_history: Array = []
 
 
+# ---------------------------------------------------------------------------
+# 视觉状态
+# 仅服务渲染与动画，不参与任何棋局判定；棋局状态一律以上方变量为准。
+# ---------------------------------------------------------------------------
+var _wood_texture: GradientTexture2D = null
+var _stone_scale: Dictionary = {}              ## Vector2i -> float，落子弹跳缩放
+var _hover_cell: Vector2i = Vector2i(-1, -1)   ## 当前悬停的空交叉点
+var _win_line: Array = []                      ## 获胜五连的坐标列表
+var _win_active: bool = false
+var _win_phase: float = 0.0
+
+
 func _ready() -> void:
 	board = make_empty_board()
+	_wood_texture = _build_wood_texture()
+	# 只监听落子信号来驱动动画，不介入棋局状态代码
+	stone_placed.connect(_on_stone_placed_visual)
 	queue_redraw()
 
 
@@ -291,22 +323,150 @@ func restart() -> void:
 
 
 # ---------------------------------------------------------------------------
+# 视觉动画
+# 全部只【读取】棋局状态，不修改任何棋局数据。
+# ---------------------------------------------------------------------------
+func _process(delta: float) -> void:
+	_update_hover()
+	_update_win_flash(delta)
+
+
+## 悬停预览：跟随鼠标更新当前悬停的空交叉点
+func _update_hover() -> void:
+	var cell: Vector2i = Vector2i(-1, -1)
+	if not game_finished and not input_locked:
+		cell = local_to_grid(get_local_mouse_position())
+	if cell != _hover_cell:
+		_hover_cell = cell
+		queue_redraw()
+
+
+## 获胜五连闪烁；重新开始 / 悔棋后自动复位
+func _update_win_flash(delta: float) -> void:
+	if game_finished and winner != EMPTY:
+		if not _win_active:
+			_win_active = true
+			_win_line = _compute_win_line()
+			_win_phase = 0.0
+		_win_phase += delta * WIN_FLASH_SPEED
+		queue_redraw()
+	elif _win_active:
+		_win_active = false
+		_win_line.clear()
+		_win_phase = 0.0
+		queue_redraw()
+
+
+## 从最后一手出发，找出连成五子的那条线（只读）
+func _compute_win_line() -> Array:
+	if last_move.x < 0:
+		return []
+	var color: int = board[last_move.x][last_move.y]
+	if color == EMPTY:
+		return []
+	for dir in DIRECTIONS:
+		var line: Array = [last_move]
+		line.append_array(_collect_dir(last_move, dir.x, dir.y, color))
+		line.append_array(_collect_dir(last_move, -dir.x, -dir.y, color))
+		if line.size() >= 5:
+			return line
+	return []
+
+
+func _collect_dir(from: Vector2i, dr: int, dc: int, color: int) -> Array:
+	var out: Array = []
+	var r: int = from.x + dr
+	var c: int = from.y + dc
+	while is_inside(r, c) and board[r][c] == color:
+		out.append(Vector2i(r, c))
+		r += dr
+		c += dc
+	return out
+
+
+## 落子弹跳：0.5 → 1.2 → 1.0
+func _on_stone_placed_visual(row: int, col: int) -> void:
+	var cell: Vector2i = Vector2i(row, col)
+	_stone_scale[cell] = DROP_SCALE_FROM
+	var tween: Tween = create_tween()
+	tween.tween_method(
+		_set_stone_scale.bind(cell), DROP_SCALE_FROM, DROP_SCALE_OVERSHOOT, DROP_UP_TIME
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_method(
+		_set_stone_scale.bind(cell), DROP_SCALE_OVERSHOOT, 1.0, DROP_SETTLE_TIME
+	).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	queue_redraw()
+
+
+func _set_stone_scale(value: float, cell: Vector2i) -> void:
+	_stone_scale[cell] = value
+	queue_redraw()
+
+
+## 木质棋盘渐变（径向：中心偏亮 → 边缘偏深）
+func _build_wood_texture() -> GradientTexture2D:
+	var gradient: Gradient = Gradient.new()
+	gradient.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
+	gradient.colors = PackedColorArray([COLOR_WOOD_CENTER, COLOR_WOOD_MID, COLOR_WOOD_EDGE])
+	var texture: GradientTexture2D = GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.width = int(BOARD_PX)
+	texture.height = int(BOARD_PX)
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.42)   # 光源略偏上，更像顶光下的木面
+	texture.fill_to = Vector2(1.0, 0.98)
+	return texture
+
+
+# ---------------------------------------------------------------------------
 # 绘制
 # ---------------------------------------------------------------------------
 func _draw() -> void:
 	_draw_board_panel()
 	_draw_grid()
 	_draw_star_points()
+	_draw_ghost_stone()
 	_draw_stones()
 	_draw_last_marker()
 
 
 func _draw_board_panel() -> void:
-	draw_rect(Rect2(Vector2.ZERO, Vector2(BOARD_PX, BOARD_PX)), COLOR_BOARD, true)
-	draw_rect(
-		Rect2(Vector2.ZERO, Vector2(BOARD_PX, BOARD_PX)),
-		COLOR_BOARD_EDGE, false, BORDER_WIDTH
-	)
+	var rect: Rect2 = Rect2(Vector2.ZERO, Vector2(BOARD_PX, BOARD_PX))
+	if _wood_texture != null:
+		draw_texture_rect(_wood_texture, rect, false)
+		_draw_wood_grain()
+	else:
+		draw_rect(rect, COLOR_BOARD, true)   # 纹理构建失败时的降级方案
+	draw_rect(rect, COLOR_BOARD_EDGE, false, BORDER_WIDTH)
+
+
+## 极淡的横向木纹，避免棋盘显得过于平滑死板
+func _draw_wood_grain() -> void:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 20260920
+	for i in 14:
+		var y: float = 16.0 + i * 45.0 + rng.randf_range(-9.0, 9.0)
+		var alpha: float = rng.randf_range(0.028, 0.060)
+		draw_line(
+			Vector2(0.0, y),
+			Vector2(BOARD_PX, y + rng.randf_range(-6.0, 6.0)),
+			Color(0.44, 0.29, 0.12, alpha),
+			rng.randf_range(1.0, 2.6)
+		)
+
+
+## 悬停预览棋子：半透明的当前回合色
+func _draw_ghost_stone() -> void:
+	if _hover_cell.x < 0 or game_finished or input_locked:
+		return
+	if board[_hover_cell.x][_hover_cell.y] != EMPTY:
+		return
+	var center: Vector2 = grid_to_local(_hover_cell)
+	var tint: Color = COLOR_BLACK if current_player == BLACK else COLOR_WHITE
+	tint.a = GHOST_ALPHA
+	draw_circle(center, STONE_RADIUS, tint)
+	# 描一圈边，让半透明棋子在木色底上也看得清
+	draw_arc(center, STONE_RADIUS, 0.0, TAU, 40, Color(tint.r, tint.g, tint.b, 0.8), 1.6, true)
 
 
 func _draw_grid() -> void:
@@ -323,29 +483,59 @@ func _draw_star_points() -> void:
 
 
 func _draw_stones() -> void:
+	# 胜负已分时，让获胜五连一起呼吸式闪烁
+	var flash: float = 1.0
+	if _win_active and not _win_line.is_empty():
+		flash = 0.42 + 0.58 * absf(sin(_win_phase))
 	for row in BOARD_SIZE:
 		for col in BOARD_SIZE:
 			var value: int = board[row][col]
 			if value == EMPTY:
 				continue
-			_draw_stone(grid_to_local(Vector2i(row, col)), value)
+			var cell: Vector2i = Vector2i(row, col)
+			var scale_f: float = _stone_scale.get(cell, 1.0)
+			var alpha: float = 1.0
+			if _win_active and _win_line.has(cell):
+				alpha = flash
+			_draw_stone(grid_to_local(cell), value, scale_f, alpha)
 
 
-func _draw_stone(center: Vector2, color: int) -> void:
-	# 阴影：向右下偏移的黑色半透明圆
-	draw_circle(center + SHADOW_OFFSET, STONE_RADIUS, COLOR_SHADOW)
+## 棋子绘制：外阴影 + 边缘压暗 + 左上高光，做出球面立体感
+func _draw_stone(center: Vector2, color: int, scale_f: float = 1.0, alpha: float = 1.0) -> void:
+	var radius: float = STONE_RADIUS * scale_f
+	if radius <= 0.2:
+		return
+	# 外阴影：向右下偏移的半透明黑圆
+	draw_circle(
+		center + SHADOW_OFFSET * scale_f, radius, Color(0.0, 0.0, 0.0, COLOR_SHADOW.a * alpha)
+	)
 	if color == BLACK:
-		draw_circle(center, STONE_RADIUS, COLOR_BLACK)
-		# 高光
-		draw_circle(center - Vector2(4.0, 4.0), STONE_RADIUS * 0.30, Color(1, 1, 1, 0.22))
+		draw_circle(center, radius, Color(COLOR_BLACK.r, COLOR_BLACK.g, COLOR_BLACK.b, alpha))
+		# 边缘压暗，制造球面转折
+		draw_arc(center, radius - 1.0, 0.0, TAU, 48, Color(0.0, 0.0, 0.0, 0.45 * alpha), 2.0, true)
+		# 左上柔光 + 更小的镜面高光点
+		draw_circle(
+			center - Vector2(radius * 0.30, radius * 0.30), radius * 0.34, Color(1, 1, 1, 0.20 * alpha)
+		)
+		draw_circle(
+			center - Vector2(radius * 0.36, radius * 0.36), radius * 0.15, Color(1, 1, 1, 0.55 * alpha)
+		)
 	else:
-		draw_circle(center, STONE_RADIUS, COLOR_WHITE)
-		draw_arc(center, STONE_RADIUS - 0.5, 0.0, TAU, 40, Color(0.55, 0.55, 0.55, 0.9), 1.0, true)
-		draw_circle(center - Vector2(4.0, 4.0), STONE_RADIUS * 0.32, COLOR_HIGHLIGHT)
+		draw_circle(center, radius, Color(COLOR_WHITE.r, COLOR_WHITE.g, COLOR_WHITE.b, alpha))
+		draw_arc(
+			center, radius - 1.0, 0.0, TAU, 48, Color(0.55, 0.55, 0.58, 0.85 * alpha), 1.5, true
+		)
+		draw_circle(
+			center - Vector2(radius * 0.30, radius * 0.30), radius * 0.36, Color(1, 1, 1, 0.55 * alpha)
+		)
+		draw_circle(
+			center - Vector2(radius * 0.36, radius * 0.36), radius * 0.15, Color(1, 1, 1, 0.95 * alpha)
+		)
 
 
 func _draw_last_marker() -> void:
 	if last_move.x < 0:
 		return
 	var center: Vector2 = grid_to_local(last_move)
-	draw_circle(center, MARK_RADIUS, COLOR_MARK)
+	var scale_f: float = _stone_scale.get(last_move, 1.0)
+	draw_circle(center, MARK_RADIUS * scale_f, COLOR_MARK)
