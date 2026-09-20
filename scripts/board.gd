@@ -22,8 +22,11 @@ signal game_over(winner: int)
 # 【重要】棋盘数据结构不变：依然是 board[row][col] 的二维数组，
 # 0=空 / 1=黑 / 2=白。改动只影响尺寸、连珠数与 AI 档位。
 # ---------------------------------------------------------------------------
+## 棋盘边长只取【奇数】：9 / 11 / 13 / 15 / 17 / 19
+## 偶数盘没有唯一的中心交叉点，天元与星位对称性会错位。
 const MIN_BOARD_SIZE: int = 9
 const MAX_BOARD_SIZE: int = 19
+const BOARD_SIZE_STEP: int = 2
 ## 连珠数：规则下限固定为 5 —— 不存在「五珠以下」的玩法
 const MIN_WIN_COUNT: int = 5
 const MAX_WIN_COUNT: int = 6
@@ -174,8 +177,13 @@ func _star_points() -> Array:
 
 ## 应用新规则并重开一局。
 ## 【注意】棋盘结构不变，仍是 board[row][col]；只是尺寸与连珠数变了。
+## 边长强制为【奇数】：偶数盘没有唯一的中心交叉点，天元、星位对称性
+## 与先后手公平性都会出问题，因此偶数一律向上取到相邻奇数。
 func set_rules(new_size: int, new_win: int, new_level: int = -1) -> void:
-	board_size = clampi(new_size, MIN_BOARD_SIZE, MAX_BOARD_SIZE)
+	var n: int = clampi(new_size, MIN_BOARD_SIZE, MAX_BOARD_SIZE)
+	if n % 2 == 0:
+		n += 1
+	board_size = clampi(n, MIN_BOARD_SIZE, MAX_BOARD_SIZE)
 	# 连珠数不能超过棋盘边长
 	win_count = clampi(new_win, MIN_WIN_COUNT, mini(MAX_WIN_COUNT, board_size))
 	if new_level >= 0:

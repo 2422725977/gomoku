@@ -45,12 +45,17 @@ game3/
 │   └── gomoku_ai.gd         # AI 算法（Alpha-Beta），纯算法、规则自适应
 ├── assets/ui/wood_bg.png    # 木色羊皮纸回纹背景（1600x1538）
 ├── docs/
-│   ├── screenshot.png       # README 主图（15 路）
+│   ├── screenshot.png       # README 主图（对局中）
+│   ├── start_screen.png     # 开始界面
 │   ├── ui_9x9.png           # 9 路配图
 │   ├── ui_19x19.png         # 19 路配图
 │   ├── ui_win.png           # 胜利界面配图
 │   ├── UI_OPTIMIZATION.md   # v1.1 UI 优化说明
-│   └── V12_UPDATE.md        # v1.2 参数化 / 木色 UI / 滑动面板说明
+│   ├── V12_UPDATE.md        # v1.2 / v1.2.1 参数化与修正说明
+│   └── competition/         # 比赛提交材料
+│       ├── README.md                        # 材料索引 + 项目速览
+│       ├── 01-gameplay-and-algorithm.md     # 核心玩法与算法说明
+│       └── 02-innovation-and-technology.md  # 创意与技术说明
 └── addons/godot_ai/         # Godot AI MCP 插件（勿手改）
 ```
 
@@ -61,16 +66,22 @@ BoardUI                  (Control)        ← scripts/ui.gd
 ├── WoodBackground       (TextureRect)    ← wood_bg.png，KEEP_ASPECT_COVERED
 ├── ChessBoard           (Node2D)         ← scripts/board.gd，位于 (30, 60)
 └── UILayer              (Control)        ← mouse_filter = IGNORE（不挡棋盘点击）
-    ├── TurnLabel        (Label)          ← 「黑棋回合」/「白棋回合」/「黑棋胜利！」
+    ├── StartScreen      (Control)        ← 开始界面，覆盖棋盘区域，mouse_filter = STOP
+    │   └── Center → Panel → VBox → [TitleLabel / SubLabel / TipLabel / StartButton]
+    ├── TurnLabel        (Label)          ← 未开始时显示标题，开始后显示轮次
     └── RightPanel       (VBoxContainer)  ← x 686~976，alignment=CENTER 垂直居中
         ├── TitlePanel   (PanelContainer) → 「玩法设置」
-        ├── SizePanel    (PanelContainer) → 「棋盘大小：15 x 15」 + SizeSlider (9~19)
+        ├── SizePanel    (PanelContainer) → 「棋盘大小：15 x 15」 + SizeSlider (9~19 步长 2)
         ├── WinPanel     (PanelContainer) → 「连珠数：5」        + WinSlider  (5~6)
         ├── SidePanel    (PanelContainer) → 「执子：…」          + SideOption
         ├── AiPanel      (PanelContainer) → 「AI 难度：普通」    + AiSlider   (1~3)
         ├── BtnPanel     (PanelContainer) → [重新开始] [悔棋]
         └── InfoPanel    (PanelContainer) → AiStatusLabel / MoveCountLabel
 ```
+
+> `StartScreen` 只覆盖棋盘区域（30,60 ~ 670,700），
+> 因此**右侧面板在开始界面仍可操作** —— 玩家可先配置玩法再开局。
+> 它带 `mouse_filter = STOP` 挡住棋盘点击，同时 `board.input_locked = true` 双保险。
 
 > `SideOption` 是 `OptionButton`：「执黑 · 先行」/「执白 · 后行」。
 > 选「执白」后角色互换 —— AI 执黑先手，`_maybe_start_ai_turn()` 会自动启动 AI 回合。
@@ -157,7 +168,7 @@ signal stone_placed(row: int, col: int)
 signal game_over(winner: int)              # 1=黑, 2=白, 0=和棋
 
 # —— 玩法参数（v1.2 起可在运行时调整）——
-var board_size: int = 15     # 9~19
+var board_size: int = 15     # 只取奇数：9/11/13/15/17/19（偶数会被向上取奇）
 var win_count:  int = 5      # 5~6（不存在五珠以下玩法）
 var ai_level:   int = 2      # 1~3（仅记录，实际由 ui.gd 下发给 AI）
 
@@ -273,6 +284,15 @@ depth = clampi(base + difficulty - 1, 1, 6)      # EASY=-1 / NORMAL=0 / HARD=+1
     `set_rules()` 里再夹一次（防绕过 UI 直接调 API）。
     `gomoku_ai.gd` 的 `set_rules()` 仍按 3~6 夹取 —— 那是算法自身的兼容范围，
     规则层的 5~6 限制由前两者负责。
+19. **棋盘边长只取奇数（v1.3.0）**：9/11/13/15/17/19。
+    偶数盘没有唯一的中心交叉点，天元与星位对称性会错位。
+    滑动条 `step = 2`；`set_rules()` 内对偶数**向上取奇**（14→15、18→19），
+    因此绕过 UI 直接调 API 也产生不了偶数盘。
+20. **开始界面会复位 `input_locked`**：`board.restart()` / `set_rules()` 内部
+    都会把 `input_locked` 置回 false，而开始界面正需要「锁住棋盘」。
+    因此 `_restart_round()` 与 `_apply_slider_rules()` 结尾都要调
+    `_sync_input_lock()` 重新锁上；`_maybe_start_ai_turn()` 也要用
+    `_game_started` 守卫，否则在开始界面选「执白」会让 AI 抢跑。
 
 ## 8. 验证方式（已跑通，0 失败）
 

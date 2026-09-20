@@ -39,6 +39,71 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="StartScreen" type="Control" parent="UILayer"]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 60.0
+offset_right = 670.0
+offset_bottom = 700.0
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="UILayer/StartScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.964706, 0.921569, 0.831373, 0.83)
+
+[node name="Center" type="CenterContainer" parent="UILayer/StartScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UILayer/StartScreen/Center"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="VBox" type="VBoxContainer" parent="UILayer/StartScreen/Center/Panel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="UILayer/StartScreen/Center/Panel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 64
+text = "五子棋"
+horizontal_alignment = 1
+
+[node name="SubLabel" type="Label" parent="UILayer/StartScreen/Center/Panel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 16
+text = "GOMOKU · 五连成线"
+horizontal_alignment = 1
+
+[node name="TipLabel" type="Label" parent="UILayer/StartScreen/Center/Panel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.435294, 0.32549, 0.266667, 1)
+text = "可在右侧先调整棋盘大小 / 连珠数 / AI 难度 / 执子"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="StartButton" type="Button" parent="UILayer/StartScreen/Center/Panel/VBox"]
+custom_minimum_size = Vector2(230, 56)
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "开始游戏"
+
 [node name="TurnLabel" type="Label" parent="UILayer"]
 layout_mode = 0
 offset_left = 30.0
@@ -89,7 +154,7 @@ text = "棋盘大小：15 x 15"
 layout_mode = 2
 min_value = 9.0
 max_value = 19.0
-step = 1.0
+step = 2.0
 value = 15.0
 
 [node name="WinPanel" type="PanelContainer" parent="UILayer/RightPanel"]

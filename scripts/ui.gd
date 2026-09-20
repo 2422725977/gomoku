@@ -34,6 +34,10 @@ const THINK_DELAY: float = 0.12   ## 让「AI 思考中…」先绘制的短暂�
 ## 玩法参数范围（与 board.gd 的常量保持一致）
 const MIN_BOARD_SIZE: int = 9
 const MAX_BOARD_SIZE: int = 19
+
+## 棋盘边长只取奇数：9 / 11 / 13 / 15 / 17 / 19
+const BOARD_SIZE_STEP: int = 2
+
 ## 连珠数下限固定为 5 —— 不存在「五珠以下」的玩法
 const MIN_WIN_COUNT: int = 5
 const MAX_WIN_COUNT: int = 6
@@ -64,6 +68,9 @@ const HOVER_SCALE: float = 1.06   ## 按钮悬停放大倍率
 # ---------------------------------------------------------------------------
 @onready var board = $ChessBoard
 @onready var turn_label: Label = $UILayer/TurnLabel
+@onready var start_screen: Control = $UILayer/StartScreen
+@onready var start_title: Label = $UILayer/StartScreen/Center/Panel/VBox/TitleLabel
+@onready var start_button: Button = $UILayer/StartScreen/Center/Panel/VBox/StartButton
 @onready var size_slider: HSlider = $UILayer/RightPanel/SizePanel/SizeBox/SizeSlider
 @onready var size_label: Label = $UILayer/RightPanel/SizePanel/SizeBox/SizeLabel
 @onready var win_slider: HSlider = $UILayer/RightPanel/WinPanel/WinBox/WinSlider
@@ -83,6 +90,9 @@ var _ai = null
 ## 防止 AI 思考期间重复触发
 var _ai_thinking: bool = false
 
+## 是否已点过「开始游戏」。未开始前：棋盘锁定、AI 不动、轮次标签显示标题。
+var _game_started: bool = false
+
 ## 滑块防抖计时器
 var _apply_timer: Timer = null
 
@@ -100,6 +110,7 @@ func _ready() -> void:
 	_setup_labels()
 	_setup_sliders()
 	_setup_side_option()
+	_setup_start_screen()
 	_connect_signals()
 	_setup_button_hover()
 	_build_result_panel()
@@ -108,6 +119,62 @@ func _ready() -> void:
 	_sync_sliders_from_board()
 	_update_rule_labels()
 	_refresh_ui()
+
+
+# ---------------------------------------------------------------------------
+# 开始界面
+# ---------------------------------------------------------------------------
+func _setup_start_screen() -> void:
+	_game_started = false
+	start_screen.visible = true
+	start_screen.modulate.a = 1.0
+	start_screen.scale = Vector2.ONE
+	# 标题卡用比普通面板更大的留白与投影
+	var panel: PanelContainer = $UILayer/StartScreen/Center/Panel
+	panel.add_theme_stylebox_override("panel", _title_box())
+	start_title.add_theme_font_override("font", _make_font(700))
+	_sync_input_lock()
+
+
+## 标题卡样式
+func _title_box() -> StyleBoxFlat:
+	var box: StyleBoxFlat = StyleBoxFlat.new()
+	box.bg_color = Color(1.0, 0.988, 0.949, 0.96)
+	box.border_color = COLOR_ACCENT
+	box.set_border_width_all(2)
+	box.set_corner_radius_all(12)
+	box.content_margin_left = 52.0
+	box.content_margin_right = 52.0
+	box.content_margin_top = 30.0
+	box.content_margin_bottom = 30.0
+	box.shadow_color = Color(0.2, 0.12, 0.04, 0.35)
+	box.shadow_size = 14
+	return box
+
+
+## 未开始时锁住棋盘（重新开始 / 改参数都会把 input_locked 复位，这里统一纠正）
+func _sync_input_lock() -> void:
+	board.input_locked = not _game_started
+
+
+## 点击「开始游戏」：标题卡淡出放大后隐藏，解锁棋盘
+func _on_start_pressed() -> void:
+	if _game_started:
+		return
+	_game_started = true
+	start_screen.pivot_offset = start_screen.size * 0.5
+	var tween: Tween = create_tween().set_parallel(true)
+	tween.tween_property(start_screen, "modulate:a", 0.0, 0.35)
+	tween.tween_property(start_screen, "scale", Vector2(1.08, 1.08), 0.35).set_trans(
+		Tween.TRANS_QUAD
+	).set_ease(Tween.EASE_OUT)
+	await tween.finished
+	start_screen.visible = false
+	start_screen.scale = Vector2.ONE
+	_sync_input_lock()
+	_refresh_ui()
+	# 玩家执白时由 AI 先手
+	_maybe_start_ai_turn()
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +301,7 @@ func _setup_labels() -> void:
 func _setup_sliders() -> void:
 	size_slider.min_value = MIN_BOARD_SIZE
 	size_slider.max_value = MAX_BOARD_SIZE
-	size_slider.step = 1.0
+	size_slider.step = float(BOARD_SIZE_STEP)   # 只产生奇数：9/11/13/15/17/19
 	win_slider.min_value = MIN_WIN_COUNT
 	win_slider.max_value = MAX_WIN_COUNT
 	win_slider.step = 1.0
@@ -278,6 +345,7 @@ func _on_side_selected(index: int) -> void:
 ## 重开一局；若轮到 AI 先手（玩家执白）则自动启动 AI 回合
 func _restart_round() -> void:
 	board.restart()
+	_sync_input_lock()   # restart 会把 input_locked 复位，未开始时必须重新锁上
 	_hide_result_panel()
 	if _ai != null and _ai.has_method("reset"):
 		_ai.reset()
@@ -287,6 +355,8 @@ func _restart_round() -> void:
 
 ## 当前轮到 AI 且对局未结束时启动 AI 回合
 func _maybe_start_ai_turn() -> void:
+	if not _game_started:
+		return
 	if _ai == null or _ai_thinking or board.game_finished:
 		return
 	if board.current_player == ai_color:
@@ -299,6 +369,7 @@ func _connect_signals() -> void:
 	restart_button.pressed.connect(_on_restart_pressed)
 	undo_button.pressed.connect(_on_undo_pressed)
 	side_option.item_selected.connect(_on_side_selected)
+	start_button.pressed.connect(_on_start_pressed)
 
 
 ## 尝试加载 AI 脚本；失败时界面仍可作为双人对弈使用
@@ -378,6 +449,8 @@ func _apply_slider_rules() -> void:
 			_apply_timer.start()
 		return
 	var n: int = int(size_slider.value)
+	if n % 2 == 0:
+		n += 1                      # 偶数盘没有唯一中心点，统一向上取奇数
 	var w: int = int(win_slider.value)
 	var level: int = int(ai_slider.value)
 	# 连珠数下限 5（不存在五珠以下玩法），且不能超过棋盘边长
@@ -386,6 +459,7 @@ func _apply_slider_rules() -> void:
 		win_slider.set_value_no_signal(w)
 
 	board.set_rules(n, w, level)
+	_sync_input_lock()   # set_rules→restart 会复位 input_locked
 	_push_rules_to_ai()
 	if _ai != null and _ai.has_method("reset"):
 		_ai.reset()
@@ -526,7 +600,7 @@ func _hide_result_panel() -> void:
 # 按钮悬停放大
 # ---------------------------------------------------------------------------
 func _setup_button_hover() -> void:
-	for node in [restart_button, undo_button]:
+	for node in [restart_button, undo_button, start_button]:
 		var btn: Control = node
 		btn.pivot_offset = btn.size * 0.5
 		btn.mouse_entered.connect(_on_button_hover.bind(btn, true))
@@ -650,6 +724,13 @@ func _find_fallback_move() -> Vector2i:
 # 界面刷新
 # ---------------------------------------------------------------------------
 func _refresh_ui() -> void:
+	if not _game_started:
+		# 开始界面：顶部显示标题而不是轮次
+		_style_turn_label("五子棋 · Gomoku", COLOR_INK, COLOR_CREAM)
+		move_count_label.text = "步数统计：0 手"
+		undo_button.disabled = true
+		return
+
 	if board.game_finished:
 		if board.winner == human_color:
 			_style_turn_label("黑棋胜利！", COLOR_ACCENT, COLOR_CREAM)
