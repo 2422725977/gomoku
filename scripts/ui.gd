@@ -23,16 +23,19 @@ const EMPTY: int = 0
 const BLACK: int = 1
 const WHITE: int = 2
 
-## 玩家执黑先行，AI 执白
-const HUMAN_COLOR: int = BLACK
-const AI_COLOR: int = WHITE
+## 玩家执子颜色 —— 由右侧「执子」选项切换（执黑先行 / 执白后行）
+var human_color: int = BLACK
+
+## AI 执子颜色 —— 恒为玩家的对手色
+var ai_color: int = WHITE
 
 const THINK_DELAY: float = 0.12   ## 让「AI 思考中…」先绘制的短暂延迟
 
 ## 玩法参数范围（与 board.gd 的常量保持一致）
 const MIN_BOARD_SIZE: int = 9
 const MAX_BOARD_SIZE: int = 19
-const MIN_WIN_COUNT: int = 3
+## 连珠数下限固定为 5 —— 不存在「五珠以下」的玩法
+const MIN_WIN_COUNT: int = 5
 const MAX_WIN_COUNT: int = 6
 const MIN_AI_LEVEL: int = 1
 const MAX_AI_LEVEL: int = 3
@@ -65,6 +68,8 @@ const HOVER_SCALE: float = 1.06   ## 按钮悬停放大倍率
 @onready var size_label: Label = $UILayer/RightPanel/SizePanel/SizeBox/SizeLabel
 @onready var win_slider: HSlider = $UILayer/RightPanel/WinPanel/WinBox/WinSlider
 @onready var win_label: Label = $UILayer/RightPanel/WinPanel/WinBox/WinLabel
+@onready var side_option: OptionButton = $UILayer/RightPanel/SidePanel/SideBox/SideOption
+@onready var side_label: Label = $UILayer/RightPanel/SidePanel/SideBox/SideLabel
 @onready var ai_slider: HSlider = $UILayer/RightPanel/AiPanel/AiBox/AiSlider
 @onready var ai_label: Label = $UILayer/RightPanel/AiPanel/AiBox/AiLabel
 @onready var restart_button: Button = $UILayer/RightPanel/BtnPanel/BtnBox/RestartButton
@@ -94,6 +99,7 @@ func _ready() -> void:
 	_build_theme()
 	_setup_labels()
 	_setup_sliders()
+	_setup_side_option()
 	_connect_signals()
 	_setup_button_hover()
 	_build_result_panel()
@@ -248,11 +254,51 @@ func _setup_sliders() -> void:
 	add_child(_apply_timer)
 
 
+## 「执子」下拉：执黑先行 / 执白后行
+func _setup_side_option() -> void:
+	side_option.clear()
+	side_option.add_item("执黑 · 先行", 0)
+	side_option.add_item("执白 · 后行", 1)
+	side_option.select(0)
+
+
+func _on_side_selected(index: int) -> void:
+	if _ai_thinking:
+		return
+	if index == 0:
+		human_color = BLACK
+		ai_color = WHITE
+	else:
+		human_color = WHITE
+		ai_color = BLACK
+	_update_rule_labels()
+	_restart_round()   # 换边必须重开一局
+
+
+## 重开一局；若轮到 AI 先手（玩家执白）则自动启动 AI 回合
+func _restart_round() -> void:
+	board.restart()
+	_hide_result_panel()
+	if _ai != null and _ai.has_method("reset"):
+		_ai.reset()
+	_refresh_ui()
+	_maybe_start_ai_turn()
+
+
+## 当前轮到 AI 且对局未结束时启动 AI 回合
+func _maybe_start_ai_turn() -> void:
+	if _ai == null or _ai_thinking or board.game_finished:
+		return
+	if board.current_player == ai_color:
+		_run_ai_turn()
+
+
 func _connect_signals() -> void:
 	board.stone_placed.connect(_on_stone_placed)
 	board.game_over.connect(_on_game_over)
 	restart_button.pressed.connect(_on_restart_pressed)
 	undo_button.pressed.connect(_on_undo_pressed)
+	side_option.item_selected.connect(_on_side_selected)
 
 
 ## 尝试加载 AI 脚本；失败时界面仍可作为双人对弈使用
@@ -289,6 +335,7 @@ func _sync_sliders_from_board() -> void:
 	size_slider.set_value_no_signal(board.board_size)
 	win_slider.set_value_no_signal(board.win_count)
 	ai_slider.set_value_no_signal(board.ai_level)
+	side_option.select(0 if human_color == BLACK else 1)
 
 
 func _level_name(level: int) -> String:
@@ -303,6 +350,9 @@ func _update_rule_labels() -> void:
 	var n: int = int(size_slider.value)
 	size_label.text = "棋盘大小：%d x %d" % [n, n]
 	win_label.text = "连珠数：%d" % int(win_slider.value)
+	side_label.text = "执子：%s" % (
+		"黑棋（你先手）" if human_color == BLACK else "白棋（AI 先手）"
+	)
 	ai_label.text = "AI 难度：%s" % _level_name(int(ai_slider.value))
 
 
@@ -323,11 +373,14 @@ func _on_slider_drag_ended(_value_changed: bool) -> void:
 ## 真正重建棋局：应用棋盘大小 / 连珠数 / AI 难度
 func _apply_slider_rules() -> void:
 	if _ai_thinking:
+		# AI 正在思考：稍后重试，别把这次改动静默丢掉
+		if _apply_timer != null:
+			_apply_timer.start()
 		return
 	var n: int = int(size_slider.value)
 	var w: int = int(win_slider.value)
 	var level: int = int(ai_slider.value)
-	# 连珠数不能超过棋盘边长
+	# 连珠数下限 5（不存在五珠以下玩法），且不能超过棋盘边长
 	w = clampi(w, MIN_WIN_COUNT, mini(MAX_WIN_COUNT, n))
 	if int(win_slider.value) != w:
 		win_slider.set_value_no_signal(w)
@@ -342,6 +395,7 @@ func _apply_slider_rules() -> void:
 	if _ai != null:
 		ai_status_label.text = "AI 待命"
 	_refresh_ui()
+	_maybe_start_ai_turn()
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +406,7 @@ func _on_stone_placed(_row: int, _col: int) -> void:
 	_refresh_ui()
 	if board.game_finished or _ai_thinking:
 		return
-	if _ai != null and board.current_player == AI_COLOR:
+	if _ai != null and board.current_player == ai_color:
 		_run_ai_turn()
 
 
@@ -370,19 +424,15 @@ func _on_game_over(winner: int) -> void:
 func _on_restart_pressed() -> void:
 	if _ai_thinking:
 		return
-	board.restart()
-	_hide_result_panel()
-	if _ai != null and _ai.has_method("reset"):
-		_ai.reset()
 	if _ai != null:
 		ai_status_label.text = "AI 待命"
-	_refresh_ui()
+	_restart_round()
 
 
 func _on_undo_pressed() -> void:
 	if _ai_thinking or board.get_move_count() == 0:
 		return
-	var undone: int = board.undo_to_player(HUMAN_COLOR)
+	var undone: int = board.undo_to_player(human_color)
 	if undone > 0:
 		_hide_result_panel()
 		if _ai != null and _ai.has_method("reset"):
@@ -441,10 +491,10 @@ func _build_result_panel() -> void:
 func _show_result_panel(winner: int) -> void:
 	if _result_layer == null:
 		return
-	if winner == HUMAN_COLOR:
+	if winner == human_color:
 		_result_label.text = "你赢了！"
 		_result_label.add_theme_color_override("font_color", COLOR_ACCENT)
-	elif winner == AI_COLOR:
+	elif winner == ai_color:
 		_result_label.text = "你输了"
 		_result_label.add_theme_color_override("font_color", Color(0.62, 0.20, 0.16))
 	else:
@@ -551,14 +601,14 @@ func _run_ai_turn() -> void:
 	var start_ms: int = Time.get_ticks_msec()
 	var move: Vector2i = Vector2i(-1, -1)
 	if _ai != null and _ai.has_method("get_best_move"):
-		move = _ai.get_best_move(board.get_board_state(), AI_COLOR)
+		move = _ai.get_best_move(board.get_board_state(), ai_color)
 	if not _is_legal(move):
 		move = _find_fallback_move()
 	if move.x < 0:
 		_finish_ai_turn("AI 无处可下")
 		return
 
-	board.set_ai_move(move.x, move.y, AI_COLOR)
+	board.set_ai_move(move.x, move.y, ai_color)
 	var elapsed: int = Time.get_ticks_msec() - start_ms
 
 	var status: String = "AI 已落子 (%d, %d)  %d ms" % [move.x, move.y, elapsed]
@@ -601,9 +651,9 @@ func _find_fallback_move() -> Vector2i:
 # ---------------------------------------------------------------------------
 func _refresh_ui() -> void:
 	if board.game_finished:
-		if board.winner == HUMAN_COLOR:
+		if board.winner == human_color:
 			_style_turn_label("黑棋胜利！", COLOR_ACCENT, COLOR_CREAM)
-		elif board.winner == AI_COLOR:
+		elif board.winner == ai_color:
 			_style_turn_label("白棋胜利！", COLOR_INK_DEEP, COLOR_CREAM)
 		else:
 			_style_turn_label("和棋", COLOR_INK, COLOR_CREAM)

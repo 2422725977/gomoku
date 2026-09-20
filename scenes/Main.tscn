@@ -108,10 +108,29 @@ text = "连珠数：5"
 
 [node name="WinSlider" type="HSlider" parent="UILayer/RightPanel/WinPanel/WinBox"]
 layout_mode = 2
-min_value = 3.0
+min_value = 5.0
 max_value = 6.0
 step = 1.0
 value = 5.0
+
+[node name="SidePanel" type="PanelContainer" parent="UILayer/RightPanel"]
+layout_mode = 2
+
+[node name="SideBox" type="VBoxContainer" parent="UILayer/RightPanel/SidePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="SideLabel" type="Label" parent="UILayer/RightPanel/SidePanel/SideBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 15
+text = "执子：黑棋（你先手）"
+
+[node name="SideOption" type="OptionButton" parent="UILayer/RightPanel/SidePanel/SideBox"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
 
 [node name="AiPanel" type="PanelContainer" parent="UILayer/RightPanel"]
 layout_mode = 2

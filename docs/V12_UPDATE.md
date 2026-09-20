@@ -1,6 +1,7 @@
 # v1.2 更新说明 · 参数化 / 木色 UI / 滑动调节面板
 
 > 本文档记录 v1.2 四个模块的改动，可直接摘取进比赛文档。
+> **v1.2.1 修正**见文末 —— 修掉一个真实的显示 Bug，并收紧连珠数下限、新增「执子」选项。
 
 ## 总览
 
@@ -9,7 +10,7 @@
 | 1 | 背景图片处理（webp → png，落入 `assets/ui/`） | ✅ |
 | 2 | 玩法参数化（`BOARD_SIZE` / `WIN_COUNT` / `AI_LEVEL`）+ AI 规则自适应 | ✅ |
 | 3 | 木色 UI 全面替换（TextureRect 背景 + 暖木棋盘 + 宋楷字体） | ✅ |
-| 4 | 右侧信息栏与滑动调节面板（RightPanel + HSlider） | ✅ |
+| 4 | 右侧信息栏与滑动调节面板（RightPanel + HSlider + 执子选项） | ✅ |
 
 **棋盘数组结构始终未变**：依然是 `board[row][col]` 的二维 `Array`，
 `0=空 / 1=黑 / 2=白`。v1.2 只让**尺寸**、**连珠数**与**AI 档位**变成可调参数。
@@ -262,3 +263,109 @@ func _on_slider_drag_ended(_value_changed: bool) -> void:
 | `scripts/ui.gd` | 重写：木色主题、RightPanel、滑块防抖、胜负弹窗上移 |
 | `project.godot` | 版本号 → 1.2.0 |
 | `docs/ui_9x9.png`、`ui_19x19.png` | 新增配图 |
+
+---
+
+# v1.2.1 修正
+
+## 修正 1 · 连珠数下限收紧为 5
+
+**问题**：v1.2 的连珠数滑块范围是 3~6，存在「五珠以下」的玩法，不符合规则。
+
+**修正**：下限固定为 **5**，三层同时收紧，防止绕过 UI 直接调 API：
+
+| 位置 | 措施 |
+|---|---|
+| `Main.tscn` | `WinSlider.min_value = 5`（滑块拖不到 5 以下） |
+| `ui.gd` | `MIN_WIN_COUNT = 5`，`_apply_slider_rules()` 里 `clampi` |
+| `board.gd` | `MIN_WIN_COUNT = 5`，`set_rules()` 里再 `clampi` 一次 |
+
+> `gomoku_ai.gd` 的 `set_rules()` 仍按 3~6 夹取 —— 那是**算法自身的兼容范围**
+> （便于复用），规则层的 5~6 限制由前三者负责。
+
+**实测**：滑块下限 = 5；强行 `win_slider.value = 3` 被夹到 5；
+`board.set_rules(15, 3)` 后 `win_count == 5`。
+
+## 修正 2 · 调整棋盘大小的显示 Bug（真实崩溃级问题）
+
+### 根因
+
+鼠标停在 **19 路**棋盘右下角时，`_hover_cell = (17, 17)`。
+此时把棋盘切到 **9 路**，在**同一帧**的 `_draw()` 里仍用旧坐标索引新数组：
+
+```
+SCRIPT ERROR: Out of bounds get index '17' (on base: 'Array')
+   at: _draw_ghost_stone (res://scripts/board.gd:524)
+```
+
+**关键点**：`_draw()` 里任何一次越界报错都会**中断整个 `_draw()`**，
+于是排在 `_draw_ghost_stone()` 之后的 `_draw_stones()` 与 `_draw_last_marker()`
+被直接跳过 —— **棋子整帧画不出来**。用户看到的就是「调大小后棋盘显示坏了」。
+
+更糟的是：如果切换后鼠标恰好还映射到与旧值相同的格子，`_update_hover()`
+认为「悬停格没变」就不会再 `queue_redraw()`，棋子可能**持续不显示**。
+
+### 修正（三重防护）
+
+1. `set_rules()` 里显式清空 `_hover_cell = Vector2i(-1, -1)`
+2. `_draw_ghost_stone()` 加 `is_inside()` **加**数组实际尺寸双重判断
+3. `_draw_stones()` 改为按 `mini(board_size, board.size())` 遍历实际数组，
+   即便尺寸变量与数组短暂不同步也不会越界
+
+### 复现与验证
+
+| 步骤 | 修正前 | 修正后 |
+|---|---|---|
+| 19 路悬停右下角 → 切 9 路 | `Out of bounds get index '17'` | 无任何报错 |
+| 切换后 `_hover_cell` | 残留 `(17,17)` | 重置为 `(-1,-1)` |
+| 切换后棋子 | 该帧丢失 | 正常绘制 |
+
+> 另用「初始就是 9 路」vs「15→19→9 切换过去」做**像素级 A/B 对比** ——
+> 76 万像素**零差异**，确认切换不残留任何渲染状态。
+
+## 修正 3 · 右侧新增「执子 / 先后手」选项
+
+新增 `SidePanel`，内含 `OptionButton`：
+
+| 选项 | 含义 |
+|---|---|
+| 执黑 · 先行 | 玩家执黑先手（默认） |
+| 执白 · 后行 | 玩家执白，**AI 执黑先手** |
+
+配套改动：
+
+- `HUMAN_COLOR` / `AI_COLOR` 由 `const` 改为 `human_color` / `ai_color` **变量**
+- 新增 `_maybe_start_ai_turn()`：轮到 AI 且对局未结束时自动启动 AI 回合 ——
+  玩家执白时用它实现「AI 先手」
+- 新增 `_restart_round()`：重开一局并在需要时让 AI 先手（重新开始按钮、换边、改参数共用）
+- 胜负文案按 `human_color` 判定「你赢了 / 你输了」
+- 悔棋改为 `undo_to_player(human_color)`
+- 侧栏标签同时显示「执子：白棋（AI 先手）」，一眼看出当前先后手
+
+**顺带修掉**：`_apply_slider_rules()` 原先在 `_ai_thinking` 时**直接 return**，
+会把这次改动**静默丢弃**（滑块显示 19 但棋盘还是 15）。
+现在改为重新启动防抖定时器，稍后重试。
+
+**实测**：切到「执白 · 后行」后 AI 立即落下一枚**黑棋**；玩家随后落的是**白棋**；
+切回「执黑 · 先行」后重开为空盘且轮到玩家先手。
+
+## v1.2.1 验证汇总
+
+21 条断言全部通过：
+
+| 分组 | 断言数 | 结果 |
+|---|---|---|
+| 连珠数下限 = 5（滑块下限 / 强行设值 / API 直调） | 4 | ✅ |
+| 调整棋盘大小不再越界（含 hover 重置） | 3 | ✅ |
+| 执子 / 先后手（含 AI 先手、玩家执白落子、换边重开） | 14 | ✅ |
+| 三个脚本语法检查 + 主场景无头运行 | — | ✅ 无 ERROR |
+
+## v1.2.1 文件改动
+
+| 文件 | 改动 |
+|---|---|
+| `scripts/board.gd` | `MIN_WIN_COUNT` → 5；`set_rules()` 清 `_hover_cell`；`_draw_ghost_stone()` / `_draw_stones()` 加边界保护 |
+| `scripts/ui.gd` | `MIN_WIN_COUNT` → 5；`human_color`/`ai_color` 变量化；新增执子选项、`_restart_round()`、`_maybe_start_ai_turn()`；`_apply_slider_rules()` 不再丢弃改动 |
+| `scenes/Main.tscn` | `WinSlider.min_value` → 5；新增 `SidePanel`（执子下拉） |
+| `scripts/gomoku_ai.gd` | 仅补充注释（说明算法兼容 3~6，规则层限制 5~6） |
+| `project.godot` | 版本号 → 1.2.1 |

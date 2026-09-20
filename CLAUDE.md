@@ -64,12 +64,16 @@ BoardUI                  (Control)        ← scripts/ui.gd
     ├── TurnLabel        (Label)          ← 「黑棋回合」/「白棋回合」/「黑棋胜利！」
     └── RightPanel       (VBoxContainer)  ← x 686~976，alignment=CENTER 垂直居中
         ├── TitlePanel   (PanelContainer) → 「玩法设置」
-        ├── SizePanel    (PanelContainer) → 「棋盘大小：15 x 15」 + SizeSlider  (9~19)
-        ├── WinPanel     (PanelContainer) → 「连珠数：5」        + WinSlider   (3~6)
-        ├── AiPanel      (PanelContainer) → 「AI 难度：普通」    + AiSlider    (1~3)
+        ├── SizePanel    (PanelContainer) → 「棋盘大小：15 x 15」 + SizeSlider (9~19)
+        ├── WinPanel     (PanelContainer) → 「连珠数：5」        + WinSlider  (5~6)
+        ├── SidePanel    (PanelContainer) → 「执子：…」          + SideOption
+        ├── AiPanel      (PanelContainer) → 「AI 难度：普通」    + AiSlider   (1~3)
         ├── BtnPanel     (PanelContainer) → [重新开始] [悔棋]
         └── InfoPanel    (PanelContainer) → AiStatusLabel / MoveCountLabel
 ```
+
+> `SideOption` 是 `OptionButton`：「执黑 · 先行」/「执白 · 后行」。
+> 选「执白」后角色互换 —— AI 执黑先手，`_maybe_start_ai_turn()` 会自动启动 AI 回合。
 
 > 每个分组都由 `PanelContainer` 包裹，统一套 `StyleBoxFlat`：
 > 圆角 8px、`#FFFFFFAA` 底、`#8B6642` 描边、4px 投影。
@@ -114,8 +118,11 @@ ui.gd::_on_stone_placed()
 | 值 | 含义 |
 | --- | --- |
 | `0` | 空 |
-| `1` | 黑棋（玩家，先行） |
-| `2` | 白棋（AI） |
+| `1` | 黑棋（**永远先行**） |
+| `2` | 白棋 |
+
+> 执黑/执白由 UI 的「执子」选项决定（`ui.gd` 的 `human_color` / `ai_color`）。
+> 无论玩家执哪边，**黑棋始终先行** —— 玩家执白时由 AI 先手。
 
 `board` 是 **`board_size` × `board_size` 的二维数组**（默认 15×15），
 索引方式恒为 `board[row][col]`。`board_size` 可变，但数组**结构从不改变**。
@@ -151,7 +158,7 @@ signal game_over(winner: int)              # 1=黑, 2=白, 0=和棋
 
 # —— 玩法参数（v1.2 起可在运行时调整）——
 var board_size: int = 15     # 9~19
-var win_count:  int = 5      # 3~6
+var win_count:  int = 5      # 5~6（不存在五珠以下玩法）
 var ai_level:   int = 2      # 1~3（仅记录，实际由 ui.gd 下发给 AI）
 
 func set_rules(new_size: int, new_win: int, new_level: int = -1) -> void   # 应用并重开一局
@@ -252,6 +259,20 @@ depth = clampi(base + difficulty - 1, 1, 6)      # EASY=-1 / NORMAL=0 / HARD=+1
 16. **胜负弹窗别居棋盘正中**：棋盘中央那条横线（15 路时是第 7 行，y≈380）
     是最常见的获胜位置，弹窗居正中会正好压住闪烁的连线。
     因此 `CenterContainer` 的 `offset_bottom` 收到 440，把弹窗中心抬到 y≈250。
+17. **改棋盘尺寸必须清 `_hover_cell`（v1.2.1 修的真实显示 bug）**：
+    鼠标停在 19 路右下角时 `_hover_cell=(17,17)`，切到 9 路后 `_draw` 里
+    `board[17]` **越界报错**；而报错会中断整个 `_draw()`，导致后面的
+    `_draw_stones()` / `_draw_last_marker()` 被跳过 —— **棋子整帧画不出来**，
+    看起来就像「调大小后棋盘显示坏了」。
+    现在三重防护：`set_rules()` 里清 `_hover_cell`、
+    `_draw_ghost_stone()` 加 `is_inside()` + 数组实际尺寸双重判断、
+    `_draw_stones()` 按 `mini(board_size, board.size())` 遍历。
+    **教训：`_draw()` 里任何一次越界都会让整帧绘制中断，比普通逻辑报错严重得多。**
+18. **连珠数下限是 5**：不存在「五珠以下」的玩法。
+    `board.gd` / `ui.gd` 的 `MIN_WIN_COUNT` 均为 5，滑块下限也是 5，
+    `set_rules()` 里再夹一次（防绕过 UI 直接调 API）。
+    `gomoku_ai.gd` 的 `set_rules()` 仍按 3~6 夹取 —— 那是算法自身的兼容范围，
+    规则层的 5~6 限制由前两者负责。
 
 ## 8. 验证方式（已跑通，0 失败）
 

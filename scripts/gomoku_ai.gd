@@ -115,7 +115,9 @@ func set_difficulty(level: int) -> void:
 	difficulty = level
 
 
-## 规则自适应：设置连珠数（3-6）。
+## 规则自适应：设置连珠数。
+## 游戏规则层限制为 5~6（不存在「五珠以下」的玩法）；
+## 算法本身兼容 3~6 以便复用，因此这里按 3~6 夹取。
 ## 棋盘尺寸无需传入 —— get_best_move() 会从 board.size() 自动推断。
 func set_rules(win_count: int) -> void:
 	_win_count = clampi(win_count, 3, 6)

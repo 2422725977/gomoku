@@ -24,7 +24,8 @@ signal game_over(winner: int)
 # ---------------------------------------------------------------------------
 const MIN_BOARD_SIZE: int = 9
 const MAX_BOARD_SIZE: int = 19
-const MIN_WIN_COUNT: int = 3
+## 连珠数：规则下限固定为 5 —— 不存在「五珠以下」的玩法
+const MIN_WIN_COUNT: int = 5
 const MAX_WIN_COUNT: int = 6
 const MIN_AI_LEVEL: int = 1
 const MAX_AI_LEVEL: int = 3
@@ -180,10 +181,14 @@ func set_rules(new_size: int, new_win: int, new_level: int = -1) -> void:
 	if new_level >= 0:
 		ai_level = clampi(new_level, MIN_AI_LEVEL, MAX_AI_LEVEL)
 	_update_geometry()
-	# 尺寸变了，旧的动画/闪烁记录全部作废
+	# 尺寸变了，旧的动画/闪烁/悬停记录全部作废
 	_stone_scale.clear()
 	_win_line.clear()
 	_win_active = false
+	# 【关键】必须清掉悬停格：否则大棋盘切小棋盘时，
+	# _draw 里会用大棋盘的坐标去索引小数组 → 越界报错，
+	# 而报错会中断整个 _draw()，导致棋子这一帧画不出来。
+	_hover_cell = Vector2i(-1, -1)
 	restart()
 
 
@@ -518,8 +523,14 @@ func _draw_wood_grain() -> void:
 
 
 ## 悬停预览棋子：半透明的当前回合色
+## 三层边界保护：is_inside() 判棋盘范围，再判数组实际尺寸，
+## 避免任何情况下用越界坐标索引 board 而中断整帧绘制。
 func _draw_ghost_stone() -> void:
 	if _hover_cell.x < 0 or game_finished or input_locked:
+		return
+	if not is_inside(_hover_cell.x, _hover_cell.y):
+		return
+	if _hover_cell.x >= board.size() or _hover_cell.y >= board[_hover_cell.x].size():
 		return
 	if board[_hover_cell.x][_hover_cell.y] != EMPTY:
 		return
@@ -549,9 +560,14 @@ func _draw_stones() -> void:
 	var flash: float = 1.0
 	if _win_active and not _win_line.is_empty():
 		flash = 0.42 + 0.58 * absf(sin(_win_phase))
-	for row in board_size:
-		for col in board_size:
-			var value: int = board[row][col]
+	# 以数组【实际】尺寸为准遍历，而不是 board_size 变量，
+	# 这样即便尺寸刚变、两者短暂不同步也不会越界。
+	var rows: int = mini(board_size, board.size())
+	for row in rows:
+		var line: Array = board[row]
+		var cols: int = mini(rows, line.size())
+		for col in cols:
+			var value: int = line[col]
 			if value == EMPTY:
 				continue
 			var cell: Vector2i = Vector2i(row, col)
