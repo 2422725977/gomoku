@@ -1,0 +1,119 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui.gd" id="1_ui"]
+[ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+
+[node name="BoardUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_ui")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.121569, 0.133333, 0.168627, 1)
+
+[node name="ChessBoard" type="Node2D" parent="."]
+position = Vector2(40, 60)
+script = ExtResource("2_board")
+
+[node name="UILayer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TurnLabel" type="Label" parent="UILayer"]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 10.0
+offset_right = 680.0
+offset_bottom = 50.0
+mouse_filter = 2
+theme_override_font_sizes/font_size = 24
+text = "黑棋回合"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BottomBar" type="HBoxContainer" parent="UILayer"]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 708.0
+offset_right = 680.0
+offset_bottom = 752.0
+mouse_filter = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="UILayer/BottomBar"]
+custom_minimum_size = Vector2(130, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "重新开始"
+
+[node name="UndoButton" type="Button" parent="UILayer/BottomBar"]
+custom_minimum_size = Vector2(110, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "悔棋"
+
+[node name="DifficultyLabel" type="Label" parent="UILayer/BottomBar"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 16
+text = "AI 难度"
+vertical_alignment = 1
+
+[node name="DifficultyOption" type="OptionButton" parent="UILayer/BottomBar"]
+custom_minimum_size = Vector2(130, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+
+[node name="SidePanel" type="VBoxContainer" parent="UILayer"]
+layout_mode = 0
+offset_left = 712.0
+offset_top = 60.0
+offset_right = 968.0
+offset_bottom = 400.0
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="SideTitleLabel" type="Label" parent="UILayer/SidePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 18
+text = "对局信息"
+
+[node name="AiStatusLabel" type="Label" parent="UILayer/SidePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 16
+text = "AI 待命"
+autowrap_mode = 3
+
+[node name="MoveCountLabel" type="Label" parent="UILayer/SidePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 16
+text = "步数统计：0 手"
+
+[node name="HintLabel" type="Label" parent="UILayer/SidePanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.639216, 0.67451, 0.741176, 1)
+text = "你执黑先行，点击棋盘交叉点落子。"
+autowrap_mode = 3

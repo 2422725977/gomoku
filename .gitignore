@@ -1,0 +1,18 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# 导出 / 构建产物
+/build/
+/export/
+/exported/
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器临时文件
+*.tmp
+*~
+*.bak
