@@ -16,3 +16,6 @@ desktop.ini
 *.tmp
 *~
 *.bak
+
+# 文档配图不需要 Godot 导入文件（assets 下的仍需要）
+/docs/*.png.import
